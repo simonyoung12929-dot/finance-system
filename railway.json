@@ -5,7 +5,7 @@
   },
   "deploy": {
     "startCommand": "node server/index.js",
-    "healthcheckPath": "/api/auth/login",
-    "restartPolicyType": "ON_FAILURE"
+    "healthcheckPath": "/health",
+"restartPolicyType": "ON_FAILURE"
   }
 }
