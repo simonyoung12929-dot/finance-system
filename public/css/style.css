@@ -88,10 +88,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft
 .page.active { display: block; }
 
 /* === 月份选择栏 === */
-.month-selector { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; background: white; padding: 14px 18px; border-radius: var(--radius); box-shadow: var(--shadow); }
-.month-selector label { font-size: 13px; color: var(--gray-500); font-weight: 500; }
-.month-selector select, .month-selector input { border: 1.5px solid var(--gray-200); border-radius: 6px; padding: 7px 10px; font-size: 14px; }
-.month-selector .btn-primary { margin-left: auto; }
+.month-selector { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; background: white; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow); flex-wrap: wrap; }
+.month-selector label { font-size: 13px; color: var(--gray-500); font-weight: 500; white-space: nowrap; }
+.month-selector select { border: 1.5px solid var(--gray-200); border-radius: 6px; padding: 6px 10px; font-size: 14px; }
+.month-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.month-btn { padding: 5px 10px; font-size: 13px; border: 1.5px solid var(--gray-200); border-radius: 6px; background: white; cursor: pointer; color: var(--gray-600); transition: all .15s; }
+.month-btn:hover { border-color: var(--primary); color: var(--primary); }
+.month-btn.active { background: var(--primary); color: white; border-color: var(--primary); font-weight: 600; }
 
 /* === 统计卡片 === */
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }

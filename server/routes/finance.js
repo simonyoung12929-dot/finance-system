@@ -24,12 +24,25 @@ router.get('/summary/:year/:month', auth, async (req, res) => {
   }
 });
 
-// 获取历史趋势（近12个月）
+// 获取历史趋势（近12个月）— 以dispatch数据为基准，外包/开支取finance表
 router.get('/trend', auth, async (req, res) => {
   const result = await pool.query(`
-    SELECT year, month, total_revenue, total_profit, profit_rate
-    FROM monthly_finance
-    ORDER BY year DESC, month DESC
+    SELECT
+      d.year, d.month,
+      COALESCE(mf.total_revenue, d.dispatch_rev + COALESCE(mf.outsource_revenue,0)) AS total_revenue,
+      COALESCE(mf.total_profit,  d.dispatch_rev - d.salary_cost) AS total_profit,
+      CASE WHEN COALESCE(mf.total_revenue, d.dispatch_rev) > 0
+        THEN COALESCE(mf.total_profit, d.dispatch_rev - d.salary_cost)
+           / COALESCE(mf.total_revenue, d.dispatch_rev) ELSE 0 END AS profit_rate
+    FROM (
+      SELECT year, month,
+        SUM(revenue) AS dispatch_rev,
+        SUM(cost)    AS salary_cost
+      FROM monthly_dispatch
+      GROUP BY year, month
+    ) d
+    LEFT JOIN monthly_finance mf ON mf.year=d.year AND mf.month=d.month
+    ORDER BY d.year DESC, d.month DESC
     LIMIT 12
   `);
   res.json(result.rows.reverse());
@@ -188,25 +201,45 @@ router.get('/months', auth, async (req, res) => {
   res.json(result.rows);
 });
 
-// 年报：汇总某年全部月份数据
+// 年报：汇总某年全部月份数据（以dispatch为基准，finance数据优先）
 router.get('/annual/:year', auth, async (req, res) => {
   const { year } = req.params;
   try {
+    // 先汇总所有有dispatch数据的月份
     const finance = await pool.query(`
       SELECT
-        COALESCE(SUM(total_revenue),0) as total_revenue,
-        COALESCE(SUM(outsource_revenue),0) as outsource_revenue,
-        COALESCE(SUM(total_salary_cost),0) as total_salary_cost,
-        COALESCE(SUM(fixed_expense),0) as fixed_expense,
-        COALESCE(SUM(other_expense),0) as other_expense,
-        COALESCE(SUM(total_profit),0) as total_profit,
-        COUNT(*) as months_count
-      FROM monthly_finance WHERE year=$1
+        COALESCE(SUM(COALESCE(mf.total_revenue, d.dispatch_rev)),0) as total_revenue,
+        COALESCE(SUM(COALESCE(mf.outsource_revenue, 0)),0) as outsource_revenue,
+        COALESCE(SUM(COALESCE(mf.total_salary_cost, d.salary_cost)),0) as total_salary_cost,
+        COALESCE(SUM(COALESCE(mf.fixed_expense, 0)),0) as fixed_expense,
+        COALESCE(SUM(COALESCE(mf.other_expense, 0)),0) as other_expense,
+        COALESCE(SUM(COALESCE(mf.total_profit, d.dispatch_rev - d.salary_cost)),0) as total_profit,
+        COUNT(DISTINCT d.month) as months_count
+      FROM (
+        SELECT month, SUM(revenue) AS dispatch_rev, SUM(cost) AS salary_cost
+        FROM monthly_dispatch WHERE year=$1 GROUP BY month
+      ) d
+      LEFT JOIN monthly_finance mf ON mf.year=$1 AND mf.month=d.month
     `, [year]);
 
     const byMonth = await pool.query(`
-      SELECT month, total_revenue, outsource_revenue, total_salary_cost, fixed_expense, other_expense, total_profit, profit_rate
-      FROM monthly_finance WHERE year=$1 ORDER BY month
+      SELECT
+        d.month,
+        COALESCE(mf.total_revenue,   d.dispatch_rev) AS total_revenue,
+        COALESCE(mf.outsource_revenue, 0)             AS outsource_revenue,
+        COALESCE(mf.total_salary_cost, d.salary_cost) AS total_salary_cost,
+        COALESCE(mf.fixed_expense, 0)                 AS fixed_expense,
+        COALESCE(mf.other_expense, 0)                 AS other_expense,
+        COALESCE(mf.total_profit, d.dispatch_rev - d.salary_cost) AS total_profit,
+        CASE WHEN COALESCE(mf.total_revenue, d.dispatch_rev) > 0
+          THEN COALESCE(mf.total_profit, d.dispatch_rev - d.salary_cost)
+             / COALESCE(mf.total_revenue, d.dispatch_rev) ELSE 0 END AS profit_rate
+      FROM (
+        SELECT month, SUM(revenue) AS dispatch_rev, SUM(cost) AS salary_cost
+        FROM monthly_dispatch WHERE year=$1 GROUP BY month
+      ) d
+      LEFT JOIN monthly_finance mf ON mf.year=$1 AND mf.month=d.month
+      ORDER BY d.month
     `, [year]);
 
     const topEmployees = await pool.query(`

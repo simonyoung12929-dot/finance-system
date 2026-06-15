@@ -39,7 +39,17 @@ let pieChart, trendChart, empBarChart, annualTrendChart;
     }
   });
 
-  document.getElementById('selMonth').value = currentMonth;
+  // 月份按钮
+  const btnContainer = document.getElementById('monthBtns');
+  for (let m = 1; m <= 12; m++) {
+    const btn = document.createElement('button');
+    btn.className = 'month-btn' + (m === currentMonth ? ' active' : '');
+    btn.textContent = m + '月';
+    btn.dataset.month = m;
+    btn.onclick = () => selectMonth(m);
+    btnContainer.appendChild(btn);
+  }
+
   document.getElementById('manualMonth').value = currentMonth;
 
   document.querySelectorAll('.nav-item[data-page]').forEach(item => {
@@ -99,6 +109,9 @@ function queryCurrentPage() {
   else loadCurrentMonth();
 }
 
+// selYear 变化时实时刷新（仅在相关页面）
+document.getElementById('selYear').addEventListener('change', queryCurrentPage);
+
 // ===== API =====
 async function api(method, path, body) {
   const opts = { method, headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } };
@@ -138,8 +151,14 @@ function statusTag(s) {
   const map = { '已支付': 'tag-paid', '已开票': 'tag-invoiced', '已确认': 'tag-invoiced', '未结算': 'tag-none' };
   return `<span class="tag ${map[s] || 'tag-pending'}">${s || '--'}</span>`;
 }
+function selectMonth(m) {
+  currentMonth = m;
+  document.querySelectorAll('.month-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.month) === m));
+  queryCurrentPage();
+}
+
 function getSelYearMonth() {
-  return { year: document.getElementById('selYear').value, month: document.getElementById('selMonth').value };
+  return { year: document.getElementById('selYear').value, month: currentMonth };
 }
 function sortArrow(key, currentKey, desc) {
   if (key !== currentKey) return '<span style="color:var(--gray-300);font-size:10px">⇅</span>';
