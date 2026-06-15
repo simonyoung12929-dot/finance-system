@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>财务仪表盘</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-layout">
+
+  <!-- 侧边栏 -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <h2>财务管理系统</h2>
+      <p>动画外包公司</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-item active" data-page="dashboard">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        总览仪表盘
+      </div>
+      <div class="nav-item" data-page="employees-profit">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        员工收益比
+      </div>
+      <div class="nav-item" data-page="upload">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        上传数据
+      </div>
+      <div class="nav-item" data-page="manual-entry">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        手动录入
+      </div>
+      <div class="nav-item admin-only" data-page="employees" style="display:none">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        员工管理
+      </div>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="user-info">
+        <div class="user-avatar" id="userAvatar">A</div>
+        <span class="user-name" id="userName">-</span>
+        <button class="logout-btn" onclick="logout()" title="退出">退出</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 主内容 -->
+  <main class="main-content">
+
+    <!-- 月份选择 -->
+    <div class="month-selector">
+      <label>查看月份：</label>
+      <select id="selYear"></select>
+      <select id="selMonth">
+        <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+        <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+        <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+        <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+      </select>
+      <button class="btn-primary btn-sm" onclick="loadCurrentMonth()">查询</button>
+    </div>
+
+    <!-- 总览页 -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <h1>总览仪表盘</h1>
+        <p id="dashboardSubtitle">加载中...</p>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card highlight">
+          <div class="label">净利润</div>
+          <div class="value" id="totalProfit">--</div>
+          <div class="sub" id="profitRate">利润率 --</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">总收入</div>
+          <div class="value" id="totalRevenue">--</div>
+          <div class="sub" id="revenueBreakdown">外派 + 外包</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">工资成本</div>
+          <div class="value" id="salaryCost">--</div>
+          <div class="sub">员工工资合计</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">其他开支</div>
+          <div class="value" id="otherExpense">--</div>
+          <div class="sub">固定 + 变动</div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>支出构成</h3>
+          <canvas id="expensePieChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>利润趋势（近12个月）</h3>
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+
+      <!-- 收入录入 -->
+      <div class="table-card">
+        <div class="table-card-header">
+          <h3>当月财务补充（外包收入 + 其他开支）</h3>
+          <button class="btn-secondary btn-sm" onclick="openFinanceModal()">编辑</button>
+        </div>
+        <div style="padding: 16px 20px;" id="financeDetail">
+          <p style="color: var(--gray-500);">点击"编辑"录入当月外包收入和其他开支</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 员工收益比页 -->
+    <div class="page" id="page-employees-profit">
+      <div class="page-header">
+        <h1>员工收益比</h1>
+        <p>结算金额 ÷ 成本，反映每位员工为公司创造的价值</p>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card chart-full">
+          <h3>员工盈利金额排行</h3>
+          <canvas id="empBarChart" style="max-height:300px"></canvas>
+        </div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-card-header">
+          <h3 id="empTableTitle">员工明细</h3>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>排名</th>
+                <th>姓名</th>
+                <th>项目</th>
+                <th>人天单价</th>
+                <th>结算人天</th>
+                <th>结算金额</th>
+                <th>成本</th>
+                <th>盈利金额</th>
+                <th>收益比</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="empTableBody">
+              <tr><td colspan="10" class="empty-state"><p>暂无数据</p></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 上传页 -->
+    <div class="page" id="page-upload">
+      <div class="page-header">
+        <h1>上传 Excel 数据</h1>
+        <p>支持上传与"3.21"格式相同的结算表，系统自动解析员工数据</p>
+      </div>
+
+      <div class="table-card" style="padding: 24px;">
+        <div class="form-row" style="margin-bottom: 20px;">
+          <div class="form-group" style="margin:0">
+            <label>数据年份</label>
+            <select id="uploadYear"></select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>数据月份</label>
+            <select id="uploadMonth">
+              <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+              <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+              <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+              <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleFileSelect(this)">
+          <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <p><span>点击选择文件</span>或拖拽至此处</p>
+          <p style="font-size:12px; margin-top:6px">支持 .xlsx / .xls / .csv 格式</p>
+        </div>
+
+        <div id="uploadResult" style="margin-top: 16px; display:none"></div>
+
+        <div style="margin-top: 24px; padding: 16px; background: var(--gray-50); border-radius: 8px;">
+          <h4 style="font-size: 13px; font-weight: 600; color: var(--gray-700); margin-bottom: 8px;">Excel 格式说明</h4>
+          <p style="font-size: 12px; color: var(--gray-500); line-height: 1.8;">
+            系统识别"3.21"格式的工作表，列结构为：<br>
+            <strong>A列：姓名</strong> | <strong>B列：人天单价</strong> | 每月占5列（结算人天、结算金额、成本、盈利金额、比例）<br>
+            1月从第3列开始，以此类推。公式：结算金额 = 人天×单价，收益比 = 盈利金额 ÷ 结算金额
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 手动录入页 -->
+    <div class="page" id="page-manual-entry">
+      <div class="page-header">
+        <h1>手动录入员工数据</h1>
+        <p>逐条录入员工当月结算数据</p>
+      </div>
+
+      <div class="table-card" style="padding: 24px;">
+        <div class="form-row-3" style="margin-bottom: 20px;">
+          <div class="form-group" style="margin:0">
+            <label>年份</label>
+            <select id="manualYear"></select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>月份</label>
+            <select id="manualMonth">
+              <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+              <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+              <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+              <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>员工</label>
+            <select id="manualEmployee"><option value="">选择员工...</option></select>
+          </div>
+        </div>
+
+        <div id="manualPreview" style="display:none; padding: 12px; background:#eff6ff; border-radius:8px; margin-bottom:16px; font-size:13px;">
+          <strong>人天单价：</strong><span id="previewRate">-</span> 元/天
+        </div>
+
+        <div class="form-row">
+          <div class="form-group" style="margin:0">
+            <label>结算人天数</label>
+            <input type="number" id="manualDays" step="0.01" min="0" oninput="calcManualPreview()" placeholder="0.00">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>实际成本（元）</label>
+            <input type="number" id="manualCost" step="0.01" min="0" oninput="calcManualPreview()" placeholder="0.00">
+          </div>
+        </div>
+
+        <div id="manualCalcResult" style="display:none; margin: 12px 0; padding: 14px; background: var(--gray-50); border-radius:8px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; text-align:center;">
+            <div><div style="font-size:11px;color:var(--gray-500);">结算金额</div><div style="font-size:18px;font-weight:700;" id="calcRevenue">-</div></div>
+            <div><div style="font-size:11px;color:var(--gray-500);">盈利金额</div><div style="font-size:18px;font-weight:700;" id="calcProfit" style="color:var(--success)">-</div></div>
+            <div><div style="font-size:11px;color:var(--gray-500);">收益比</div><div style="font-size:18px;font-weight:700;" id="calcRatio">-</div></div>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top:4px;">
+          <div class="form-group" style="margin:0">
+            <label>状态</label>
+            <select id="manualStatus">
+              <option value="未结算">未结算</option>
+              <option value="已支付">已支付</option>
+              <option value="已开票">已开票</option>
+              <option value="已确认">已确认</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>备注</label>
+            <input type="text" id="manualNotes" placeholder="可选">
+          </div>
+        </div>
+
+        <div style="margin-top:20px; display:flex; gap:10px;">
+          <button class="btn-primary" onclick="submitManualEntry()">保存</button>
+          <div id="manualMsg" style="line-height:38px; font-size:13px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 员工管理页 -->
+    <div class="page" id="page-employees">
+      <div class="page-header">
+        <h1>员工管理</h1>
+        <p>管理员工档案和人天单价</p>
+      </div>
+      <div class="table-card">
+        <div class="table-card-header">
+          <h3>员工列表</h3>
+          <button class="btn-primary btn-sm" onclick="openEmpModal()">+ 新增员工</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>姓名</th><th>项目组</th><th>人天单价</th><th>月薪</th><th>房补/天</th><th>操作</th></tr>
+          </thead>
+          <tbody id="empMgmtBody">
+            <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-500)">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- 财务录入模态框 -->
+<div class="modal-overlay" id="financeModal">
+  <div class="modal">
+    <h2>录入当月财务数据</h2>
+    <div class="form-group">
+      <label>外包收入（元）</label>
+      <input type="number" id="fOutsource" step="0.01" min="0" placeholder="0">
+    </div>
+    <div class="form-group">
+      <label>固定开支（元）<span style="font-size:11px;color:var(--gray-500)">房租、水电等</span></label>
+      <input type="number" id="fFixed" step="0.01" min="0" placeholder="0">
+    </div>
+    <div class="form-group">
+      <label>其他变动支出（元）<span style="font-size:11px;color:var(--gray-500)">采购、杂费等</span></label>
+      <input type="number" id="fOther" step="0.01" min="0" placeholder="0">
+    </div>
+    <div class="form-group">
+      <label>备注</label>
+      <input type="text" id="fNotes" placeholder="可选">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('financeModal')">取消</button>
+      <button class="btn-primary" onclick="saveFinance()">保存计算</button>
+    </div>
+  </div>
+</div>
+
+<!-- 员工管理模态框 -->
+<div class="modal-overlay" id="empModal">
+  <div class="modal">
+    <h2 id="empModalTitle">新增员工</h2>
+    <input type="hidden" id="empModalId">
+    <div class="form-group">
+      <label>姓名</label>
+      <input type="text" id="empName" placeholder="请输入姓名">
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="margin:0">
+        <label>项目组</label>
+        <input type="text" id="empProject" placeholder="如 L36、L22">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>人天单价（元/天）</label>
+        <input type="number" id="empRate" step="0.01" min="0">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="margin:0">
+        <label>月薪（元）</label>
+        <input type="number" id="empSalary" step="0.01" min="0" placeholder="0">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>房补（元/天）</label>
+        <input type="number" id="empHousing" step="0.01" min="0" placeholder="0">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('empModal')">取消</button>
+      <button class="btn-primary" onclick="saveEmployee()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
