@@ -2,9 +2,11 @@ const router = require('express').Router();
 const pool = require('../db');
 const auth = require('../middleware/auth');
 
-// 获取所有员工
+// 获取所有员工（含离职）
 router.get('/', auth, async (req, res) => {
-  const result = await pool.query('SELECT * FROM employees WHERE is_active = true ORDER BY project, name');
+  const result = await pool.query(
+    'SELECT * FROM employees ORDER BY resigned_date NULLS FIRST, project, name'
+  );
   res.json(result.rows);
 });
 
@@ -34,11 +36,26 @@ router.put('/:id', auth, async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// 停用员工
-router.delete('/:id', auth, async (req, res) => {
+// 标记离职
+router.post('/:id/resign', auth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: '无权限' });
-  await pool.query('UPDATE employees SET is_active = false WHERE id = $1', [req.params.id]);
-  res.json({ message: '已停用' });
+  const { resigned_date } = req.body;
+  if (!resigned_date) return res.status(400).json({ error: '请填写离职日期' });
+  const r = await pool.query(
+    'UPDATE employees SET resigned_date=$1, is_active=false WHERE id=$2 RETURNING *',
+    [resigned_date, req.params.id]
+  );
+  res.json(r.rows[0]);
+});
+
+// 撤销离职（恢复在职）
+router.post('/:id/reinstate', auth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: '无权限' });
+  const r = await pool.query(
+    'UPDATE employees SET resigned_date=NULL, is_active=true WHERE id=$1 RETURNING *',
+    [req.params.id]
+  );
+  res.json(r.rows[0]);
 });
 
 module.exports = router;

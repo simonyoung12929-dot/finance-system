@@ -17,12 +17,16 @@ CREATE TABLE IF NOT EXISTS employees (
   monthly_salary NUMERIC(10,2),       -- 月薪（成本基础）
   housing_subsidy NUMERIC(10,2) DEFAULT 0,  -- 房补（每天）
   is_active BOOLEAN DEFAULT true,
+  resigned_date DATE DEFAULT NULL,
   created_at TIMESTAMP DEFAULT NOW()
 );
--- 为旧表添加 employee_type 列（如已存在则忽略）
+-- 为旧表添加列（如已存在则忽略）
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='employee_type') THEN
     ALTER TABLE employees ADD COLUMN employee_type VARCHAR(10) DEFAULT '外派';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='resigned_date') THEN
+    ALTER TABLE employees ADD COLUMN resigned_date DATE DEFAULT NULL;
   END IF;
 END $$;
 

@@ -74,16 +74,31 @@ function logout() {
   window.location.href = '/';
 }
 
+let currentPage = 'dashboard';
+
 function switchPage(page) {
+  currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   document.querySelector(`[data-page="${page}"]`).classList.add('active');
 
+  // 员工管理和数据管理不需要月份选择栏
+  const hideBar = page === 'employees' || page === 'data-manage';
+  document.getElementById('monthSelectorBar').style.display = hideBar ? 'none' : '';
+
   if (page === 'employees') loadEmpMgmt();
   if (page === 'employees-profit') loadEmployeeProfit();
   if (page === 'annual') loadAnnual();
   if (page === 'data-manage') loadDataManage();
+}
+
+// 查询按钮根据当前页面执行对应刷新
+function queryCurrentPage() {
+  if (currentPage === 'dashboard') loadCurrentMonth();
+  else if (currentPage === 'employees-profit') { loadCurrentMonth(); loadEmployeeProfit(); }
+  else if (currentPage === 'annual') loadAnnual();
+  else loadCurrentMonth();
 }
 
 // ===== API 请求 =====
@@ -253,7 +268,9 @@ async function loadTrend() {
 
 // ===== 年度报告 =====
 async function loadAnnual() {
-  const year = document.getElementById('annualYear').value;
+  const sel = document.getElementById('annualYear');
+  if (!sel) return;
+  const year = sel.value;
   const data = await api('GET', `/finance/annual/${year}`);
   if (data.error) return;
 
@@ -514,21 +531,38 @@ async function uploadFile(file) {
 async function loadEmpMgmt() {
   const filter = document.getElementById('empListFilter')?.value || '';
   let rows = await api('GET', '/employees');
-  if (filter) rows = rows.filter(e => e.employee_type === filter);
-  document.getElementById('empMgmtBody').innerHTML = rows.map(e => `
+
+  const active = rows.filter(e => !e.resigned_date && (e.is_active !== false));
+  const resigned = rows.filter(e => e.resigned_date || e.is_active === false);
+
+  const filtered = filter ? active.filter(e => e.employee_type === filter) : active;
+
+  document.getElementById('empMgmtBody').innerHTML = filtered.map(e => `
     <tr>
       <td style="font-weight:600">${e.name}</td>
       <td>${typeBadge(e.employee_type)}</td>
       <td>${e.project || '--'}</td>
       <td>¥${parseFloat(e.daily_rate).toLocaleString()}/天</td>
       <td>${e.monthly_salary ? fmt(e.monthly_salary) : '--'}</td>
-      <td>${e.housing_subsidy > 0 ? '¥' + e.housing_subsidy + '/天' : '--'}</td>
       <td>
         <button class="btn-secondary btn-sm" onclick="openEmpModal(${JSON.stringify(e).replace(/"/g,'&quot;')})">编辑</button>
-        <button class="btn-danger btn-sm" style="margin-left:6px" onclick="deactivateEmp(${e.id})">停用</button>
+        <button class="btn-danger btn-sm" style="margin-left:6px" onclick="openResignModal(${e.id}, '${e.name}')">离职</button>
       </td>
     </tr>
-  `).join('') || `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-500)">暂无员工</td></tr>`;
+  `).join('') || `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-500)">暂无在职员工</td></tr>`;
+
+  document.getElementById('empResignedBody').innerHTML = resigned.length ? resigned.map(e => `
+    <tr style="color:var(--gray-400)">
+      <td style="font-weight:600">${e.name}</td>
+      <td>${typeBadge(e.employee_type)}</td>
+      <td>${e.project || '--'}</td>
+      <td>¥${parseFloat(e.daily_rate).toLocaleString()}/天</td>
+      <td>${e.resigned_date ? e.resigned_date.slice(0,10) : '--'}</td>
+      <td>
+        <button class="btn-secondary btn-sm" onclick="reinstateEmp(${e.id})">恢复在职</button>
+      </td>
+    </tr>
+  `).join('') : `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-400)">无离职员工</td></tr>`;
 }
 
 function openEmpModal(emp) {
@@ -560,10 +594,28 @@ async function saveEmployee() {
   loadEmployees();
 }
 
-async function deactivateEmp(id) {
-  if (!confirm('确认停用该员工吗？')) return;
-  await api('DELETE', `/employees/${id}`);
+function openResignModal(id, name) {
+  document.getElementById('resignEmpId').value = id;
+  document.getElementById('resignEmpName').textContent = `员工：${name}`;
+  document.getElementById('resignDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('resignModal').classList.add('open');
+}
+
+async function submitResign() {
+  const id = document.getElementById('resignEmpId').value;
+  const resigned_date = document.getElementById('resignDate').value;
+  if (!resigned_date) { alert('请填写离职日期'); return; }
+  await api('POST', `/employees/${id}/resign`, { resigned_date });
+  closeModal('resignModal');
   loadEmpMgmt();
+  loadEmployees();
+}
+
+async function reinstateEmp(id) {
+  if (!confirm('确认恢复该员工为在职状态？')) return;
+  await api('POST', `/employees/${id}/reinstate`, {});
+  loadEmpMgmt();
+  loadEmployees();
 }
 
 // ===== 数据管理 =====
