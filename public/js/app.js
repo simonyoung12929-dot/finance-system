@@ -192,28 +192,48 @@ async function loadCurrentMonth() {
 
 function renderDashboard(data, year, month) {
   document.getElementById('dashboardSubtitle').textContent = `${year}年${month}月 财务汇总`;
-  const f = data.finance;
-  if (f) {
-    const profit = parseFloat(f.total_profit);
-    document.getElementById('totalProfit').textContent = fmt(f.total_profit);
-    document.getElementById('totalProfit').className = 'value ' + (profit >= 0 ? '' : 'loss');
-    document.getElementById('profitRate').textContent = '利润率 ' + fmtRatio(f.profit_rate);
-    document.getElementById('totalRevenue').textContent = fmt(f.total_revenue);
-    document.getElementById('revenueBreakdown').textContent = `外派 ${fmt(f.total_revenue - f.outsource_revenue)} + 外包 ${fmt(f.outsource_revenue)}`;
-    document.getElementById('salaryCost').textContent = fmt(f.total_salary_cost);
-    document.getElementById('otherExpense').textContent = fmt(parseFloat(f.fixed_expense) + parseFloat(f.other_expense));
-    document.getElementById('financeDetail').innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;font-size:13px;">
-        <div><span style="color:var(--gray-500)">外包收入：</span><strong>${fmt(f.outsource_revenue)}</strong></div>
-        <div><span style="color:var(--gray-500)">固定开支：</span><strong>${fmt(f.fixed_expense)}</strong></div>
-        <div><span style="color:var(--gray-500)">变动支出：</span><strong>${fmt(f.other_expense)}</strong></div>
-        ${f.notes ? `<div style="grid-column:1/-1;color:var(--gray-500)">备注：${f.notes}</div>` : ''}
-      </div>`;
-    renderPieChart(f);
-  } else {
-    ['totalProfit','totalRevenue','salaryCost','otherExpense'].forEach(id => document.getElementById(id).textContent = '--');
-    document.getElementById('financeDetail').innerHTML = '<p style="color:var(--gray-500)">暂无本月财务数据，请先上传数据或录入外包收入</p>';
-  }
+
+  // 优先用 monthly_finance 记录；没有则从员工外派数据推算，外包/开支默认为 0
+  const emps = data.employees || [];
+  const dispatchRevenue = emps.reduce((s, e) => s + parseFloat(e.revenue || 0), 0);
+  const salaryCost = emps.reduce((s, e) => s + parseFloat(e.cost || 0), 0);
+
+  const f = data.finance ? {
+    total_revenue: parseFloat(data.finance.total_revenue),
+    outsource_revenue: parseFloat(data.finance.outsource_revenue),
+    total_salary_cost: parseFloat(data.finance.total_salary_cost),
+    fixed_expense: parseFloat(data.finance.fixed_expense),
+    other_expense: parseFloat(data.finance.other_expense),
+    total_profit: parseFloat(data.finance.total_profit),
+    profit_rate: parseFloat(data.finance.profit_rate),
+    notes: data.finance.notes
+  } : {
+    total_revenue: dispatchRevenue,
+    outsource_revenue: 0,
+    total_salary_cost: salaryCost,
+    fixed_expense: 0,
+    other_expense: 0,
+    total_profit: dispatchRevenue - salaryCost,
+    profit_rate: dispatchRevenue > 0 ? (dispatchRevenue - salaryCost) / dispatchRevenue : 0,
+    notes: null
+  };
+
+  const profit = f.total_profit;
+  document.getElementById('totalProfit').textContent = fmt(profit);
+  document.getElementById('totalProfit').className = 'value ' + (profit >= 0 ? '' : 'loss');
+  document.getElementById('profitRate').textContent = '利润率 ' + fmtRatio(f.profit_rate);
+  document.getElementById('totalRevenue').textContent = fmt(f.total_revenue);
+  document.getElementById('revenueBreakdown').textContent = `外派 ${fmt(f.total_revenue - f.outsource_revenue)} + 外包 ${fmt(f.outsource_revenue)}`;
+  document.getElementById('salaryCost').textContent = fmt(f.total_salary_cost);
+  document.getElementById('otherExpense').textContent = fmt(f.fixed_expense + f.other_expense);
+  document.getElementById('financeDetail').innerHTML = data.finance ? `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;font-size:13px;">
+      <div><span style="color:var(--gray-500)">外包收入：</span><strong>${fmt(f.outsource_revenue)}</strong></div>
+      <div><span style="color:var(--gray-500)">固定开支：</span><strong>${fmt(f.fixed_expense)}</strong></div>
+      <div><span style="color:var(--gray-500)">变动支出：</span><strong>${fmt(f.other_expense)}</strong></div>
+      ${f.notes ? `<div style="grid-column:1/-1;color:var(--gray-500)">备注：${f.notes}</div>` : ''}
+    </div>` : `<p style="color:var(--gray-400);font-size:13px">未录入外包收入和其他开支，以上数据仅含员工外派部分。点击"编辑"可补充录入。</p>`;
+  renderPieChart(f);
 }
 
 function renderPieChart(f) {
