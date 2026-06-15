@@ -12,12 +12,19 @@ CREATE TABLE IF NOT EXISTS employees (
   id SERIAL PRIMARY KEY,
   name VARCHAR(50) NOT NULL,
   project VARCHAR(50),           -- 所属项目组（如L36、L22等）
+  employee_type VARCHAR(10) DEFAULT '外派', -- 外派 / 外包
   daily_rate NUMERIC(10,2) NOT NULL,  -- 人天单价
   monthly_salary NUMERIC(10,2),       -- 月薪（成本基础）
   housing_subsidy NUMERIC(10,2) DEFAULT 0,  -- 房补（每天）
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMP DEFAULT NOW()
 );
+-- 为旧表添加 employee_type 列（如已存在则忽略）
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='employee_type') THEN
+    ALTER TABLE employees ADD COLUMN employee_type VARCHAR(10) DEFAULT '外派';
+  END IF;
+END $$;
 
 -- 月度外派记录（每位员工每月）
 CREATE TABLE IF NOT EXISTS monthly_dispatch (

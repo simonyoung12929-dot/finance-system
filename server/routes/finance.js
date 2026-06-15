@@ -188,4 +188,89 @@ router.get('/months', auth, async (req, res) => {
   res.json(result.rows);
 });
 
+// 年报：汇总某年全部月份数据
+router.get('/annual/:year', auth, async (req, res) => {
+  const { year } = req.params;
+  try {
+    const finance = await pool.query(`
+      SELECT
+        COALESCE(SUM(total_revenue),0) as total_revenue,
+        COALESCE(SUM(outsource_revenue),0) as outsource_revenue,
+        COALESCE(SUM(total_salary_cost),0) as total_salary_cost,
+        COALESCE(SUM(fixed_expense),0) as fixed_expense,
+        COALESCE(SUM(other_expense),0) as other_expense,
+        COALESCE(SUM(total_profit),0) as total_profit,
+        COUNT(*) as months_count
+      FROM monthly_finance WHERE year=$1
+    `, [year]);
+
+    const byMonth = await pool.query(`
+      SELECT month, total_revenue, outsource_revenue, total_salary_cost, fixed_expense, other_expense, total_profit, profit_rate
+      FROM monthly_finance WHERE year=$1 ORDER BY month
+    `, [year]);
+
+    const topEmployees = await pool.query(`
+      SELECT e.name, e.employee_type,
+        SUM(md.revenue) as total_revenue,
+        SUM(md.profit) as total_profit,
+        SUM(md.dispatch_days) as total_days,
+        CASE WHEN SUM(md.revenue)>0 THEN SUM(md.profit)/SUM(md.revenue) ELSE 0 END as avg_ratio
+      FROM monthly_dispatch md
+      JOIN employees e ON md.employee_id = e.id
+      WHERE md.year=$1
+      GROUP BY e.id, e.name, e.employee_type
+      ORDER BY total_profit DESC
+      LIMIT 20
+    `, [year]);
+
+    const f = finance.rows[0];
+    const total_revenue = parseFloat(f.total_revenue);
+    const profit_rate = total_revenue > 0 ? parseFloat(f.total_profit) / total_revenue : 0;
+
+    res.json({ year, summary: { ...f, profit_rate }, byMonth: byMonth.rows, topEmployees: topEmployees.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 清除数据
+router.delete('/clear', auth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: '无权限' });
+  const { year, month, employee_id } = req.body;
+  if (!year) return res.status(400).json({ error: '请指定年份' });
+
+  try {
+    let dispatchQuery, dispatchParams;
+    if (employee_id && month) {
+      dispatchQuery = 'DELETE FROM monthly_dispatch WHERE year=$1 AND month=$2 AND employee_id=$3';
+      dispatchParams = [year, month, employee_id];
+    } else if (employee_id) {
+      dispatchQuery = 'DELETE FROM monthly_dispatch WHERE year=$1 AND employee_id=$2';
+      dispatchParams = [year, employee_id];
+    } else if (month) {
+      dispatchQuery = 'DELETE FROM monthly_dispatch WHERE year=$1 AND month=$2';
+      dispatchParams = [year, month];
+    } else {
+      dispatchQuery = 'DELETE FROM monthly_dispatch WHERE year=$1';
+      dispatchParams = [year];
+    }
+
+    const d = await pool.query(dispatchQuery, dispatchParams);
+
+    let financeDeleted = 0;
+    if (!employee_id) {
+      const fQuery = month
+        ? 'DELETE FROM monthly_finance WHERE year=$1 AND month=$2'
+        : 'DELETE FROM monthly_finance WHERE year=$1';
+      const fParams = month ? [year, month] : [year];
+      const f = await pool.query(fQuery, fParams);
+      financeDeleted = f.rowCount;
+    }
+
+    res.json({ deleted_dispatch: d.rowCount, deleted_finance: financeDeleted });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -11,11 +11,11 @@ router.get('/', auth, async (req, res) => {
 // 新增员工
 router.post('/', auth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: '无权限' });
-  const { name, project, daily_rate, monthly_salary, housing_subsidy } = req.body;
+  const { name, project, employee_type, daily_rate, monthly_salary, housing_subsidy } = req.body;
   try {
     const r = await pool.query(
-      'INSERT INTO employees (name, project, daily_rate, monthly_salary, housing_subsidy) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [name, project, daily_rate, monthly_salary || 0, housing_subsidy || 0]
+      'INSERT INTO employees (name, project, employee_type, daily_rate, monthly_salary, housing_subsidy) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [name, project, employee_type || '外派', daily_rate, monthly_salary || 0, housing_subsidy || 0]
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -26,10 +26,10 @@ router.post('/', auth, async (req, res) => {
 // 更新员工
 router.put('/:id', auth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: '无权限' });
-  const { name, project, daily_rate, monthly_salary, housing_subsidy } = req.body;
+  const { name, project, employee_type, daily_rate, monthly_salary, housing_subsidy } = req.body;
   const r = await pool.query(
-    'UPDATE employees SET name=$1, project=$2, daily_rate=$3, monthly_salary=$4, housing_subsidy=$5 WHERE id=$6 RETURNING *',
-    [name, project, daily_rate, monthly_salary, housing_subsidy, req.params.id]
+    'UPDATE employees SET name=$1, project=$2, employee_type=$3, daily_rate=$4, monthly_salary=$5, housing_subsidy=$6 WHERE id=$7 RETURNING *',
+    [name, project, employee_type || '外派', daily_rate, monthly_salary, housing_subsidy, req.params.id]
   );
   res.json(r.rows[0]);
 });

@@ -21,6 +21,10 @@
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
         总览仪表盘
       </div>
+      <div class="nav-item" data-page="annual">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        年度报告
+      </div>
       <div class="nav-item" data-page="employees-profit">
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         员工收益比
@@ -36,6 +40,10 @@
       <div class="nav-item admin-only" data-page="employees" style="display:none">
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         员工管理
+      </div>
+      <div class="nav-item admin-only" data-page="data-manage" style="display:none">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        数据管理
       </div>
     </nav>
     <div class="sidebar-bottom">
@@ -116,11 +124,102 @@
       </div>
     </div>
 
+    <!-- 年度报告页 -->
+    <div class="page" id="page-annual">
+      <div class="page-header">
+        <h1>年度报告</h1>
+        <p>查看全年财务汇总与员工年度收益</p>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+        <label style="font-size:14px;color:var(--gray-600)">选择年份：</label>
+        <select id="annualYear" style="padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px;"></select>
+        <button class="btn-primary btn-sm" onclick="loadAnnual()">查看年报</button>
+      </div>
+
+      <div class="stats-grid" id="annualStats" style="display:none">
+        <div class="stat-card highlight">
+          <div class="label">年度净利润</div>
+          <div class="value" id="annualProfit">--</div>
+          <div class="sub" id="annualProfitRate">利润率 --</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">年度总收入</div>
+          <div class="value" id="annualRevenue">--</div>
+          <div class="sub" id="annualRevBreak">外派 + 外包</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">年度工资成本</div>
+          <div class="value" id="annualSalary">--</div>
+          <div class="sub" id="annualMonthsCount">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">年度其他开支</div>
+          <div class="value" id="annualExpense">--</div>
+          <div class="sub">固定 + 变动合计</div>
+        </div>
+      </div>
+
+      <div class="charts-grid" id="annualCharts" style="display:none">
+        <div class="chart-card chart-full">
+          <h3>月度利润走势</h3>
+          <canvas id="annualTrendChart" style="max-height:280px"></canvas>
+        </div>
+      </div>
+
+      <div class="table-card" id="annualEmpCard" style="display:none">
+        <div class="table-card-header">
+          <h3 id="annualEmpTitle">年度员工收益排行</h3>
+          <div style="display:flex;gap:8px;">
+            <select id="annualEmpFilter" onchange="renderAnnualEmpTable()" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;">
+              <option value="">全部人员</option>
+              <option value="外派">仅外派</option>
+              <option value="外包">仅外包</option>
+            </select>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>排名</th><th>姓名</th><th>类型</th><th>年度人天</th>
+                <th>年度结算额</th><th>年度盈利</th><th>平均收益比</th>
+              </tr>
+            </thead>
+            <tbody id="annualEmpBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="table-card" id="annualMonthCard" style="display:none">
+        <div class="table-card-header">
+          <h3>各月明细</h3>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr><th>月份</th><th>总收入</th><th>外包收入</th><th>工资成本</th><th>其他开支</th><th>净利润</th><th>利润率</th></tr>
+            </thead>
+            <tbody id="annualMonthBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- 员工收益比页 -->
     <div class="page" id="page-employees-profit">
       <div class="page-header">
         <h1>员工收益比</h1>
         <p>结算金额 ÷ 成本，反映每位员工为公司创造的价值</p>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;">
+        <label style="font-size:13px;color:var(--gray-600)">人员筛选：</label>
+        <select id="empTypeFilter" onchange="loadEmployeeProfit()" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;">
+          <option value="">全部人员</option>
+          <option value="外派">仅外派</option>
+          <option value="外包">仅外包</option>
+        </select>
       </div>
 
       <div class="charts-grid">
@@ -140,6 +239,7 @@
               <tr>
                 <th>排名</th>
                 <th>姓名</th>
+                <th>类型</th>
                 <th>项目</th>
                 <th>人天单价</th>
                 <th>结算人天</th>
@@ -151,7 +251,7 @@
               </tr>
             </thead>
             <tbody id="empTableBody">
-              <tr><td colspan="10" class="empty-state"><p>暂无数据</p></td></tr>
+              <tr><td colspan="11" class="empty-state"><p>暂无数据</p></td></tr>
             </tbody>
           </table>
         </div>
@@ -221,9 +321,18 @@
             </select>
           </div>
           <div class="form-group" style="margin:0">
-            <label>员工</label>
-            <select id="manualEmployee"><option value="">选择员工...</option></select>
+            <label>人员类型</label>
+            <select id="manualEmpType" onchange="filterManualEmployees()">
+              <option value="">全部</option>
+              <option value="外派">外派</option>
+              <option value="外包">外包</option>
+            </select>
           </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:20px">
+          <label>员工</label>
+          <select id="manualEmployee"><option value="">选择员工...</option></select>
         </div>
 
         <div id="manualPreview" style="display:none; padding: 12px; background:#eff6ff; border-radius:8px; margin-bottom:16px; font-size:13px;">
@@ -281,16 +390,65 @@
       <div class="table-card">
         <div class="table-card-header">
           <h3>员工列表</h3>
-          <button class="btn-primary btn-sm" onclick="openEmpModal()">+ 新增员工</button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select id="empListFilter" onchange="loadEmpMgmt()" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;">
+              <option value="">全部人员</option>
+              <option value="外派">仅外派</option>
+              <option value="外包">仅外包</option>
+            </select>
+            <button class="btn-primary btn-sm" onclick="openEmpModal()">+ 新增员工</button>
+          </div>
         </div>
         <table>
           <thead>
-            <tr><th>姓名</th><th>项目组</th><th>人天单价</th><th>月薪</th><th>房补/天</th><th>操作</th></tr>
+            <tr><th>姓名</th><th>类型</th><th>项目组</th><th>人天单价</th><th>月薪</th><th>房补/天</th><th>操作</th></tr>
           </thead>
           <tbody id="empMgmtBody">
-            <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-500)">加载中...</td></tr>
+            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-500)">加载中...</td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- 数据管理页 -->
+    <div class="page" id="page-data-manage">
+      <div class="page-header">
+        <h1>数据管理</h1>
+        <p>清除历史数据（操作不可撤销，请谨慎使用）</p>
+      </div>
+
+      <div class="table-card" style="padding:24px;">
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:20px;color:var(--danger)">⚠ 清除数据</h3>
+
+        <div class="form-row-3" style="margin-bottom:16px;">
+          <div class="form-group" style="margin:0">
+            <label>年份 <span style="color:var(--danger)">*</span></label>
+            <select id="clearYear"></select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>月份（留空=清除全年）</label>
+            <select id="clearMonth">
+              <option value="">全年</option>
+              <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+              <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+              <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+              <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>员工（留空=所有员工）</label>
+            <select id="clearEmployee">
+              <option value="">所有员工</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#991b1b;" id="clearPreviewText">
+          请选择年份后查看清除范围预览
+        </div>
+
+        <button class="btn-danger" onclick="confirmClear()">确认清除</button>
+        <span id="clearMsg" style="margin-left:12px;font-size:13px;"></span>
       </div>
     </div>
 
@@ -329,9 +487,18 @@
   <div class="modal">
     <h2 id="empModalTitle">新增员工</h2>
     <input type="hidden" id="empModalId">
-    <div class="form-group">
-      <label>姓名</label>
-      <input type="text" id="empName" placeholder="请输入姓名">
+    <div class="form-row">
+      <div class="form-group" style="margin:0">
+        <label>姓名</label>
+        <input type="text" id="empName" placeholder="请输入姓名">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>人员类型</label>
+        <select id="empType">
+          <option value="外派">外派</option>
+          <option value="外包">外包</option>
+        </select>
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group" style="margin:0">
