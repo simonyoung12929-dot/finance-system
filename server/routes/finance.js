@@ -245,7 +245,8 @@ router.get('/annual/:year', auth, async (req, res) => {
     const topEmployees = await pool.query(`
       SELECT e.name, e.employee_type,
         SUM(md.revenue) as total_revenue,
-        SUM(md.profit) as total_profit,
+        SUM(md.cost)    as total_cost,
+        SUM(md.profit)  as total_profit,
         SUM(md.dispatch_days) as total_days,
         CASE WHEN SUM(md.revenue)>0 THEN SUM(md.profit)/SUM(md.revenue) ELSE 0 END as avg_ratio
       FROM monthly_dispatch md
@@ -253,7 +254,7 @@ router.get('/annual/:year', auth, async (req, res) => {
       WHERE md.year=$1
       GROUP BY e.id, e.name, e.employee_type
       ORDER BY total_profit DESC
-      LIMIT 20
+      LIMIT 100
     `, [year]);
 
     const f = finance.rows[0];
@@ -301,6 +302,110 @@ router.delete('/clear', auth, async (req, res) => {
     }
 
     res.json({ deleted_dispatch: d.rowCount, deleted_finance: financeDeleted });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 导出Excel（全年数据，三个Sheet）
+router.get('/export/:year', auth, async (req, res) => {
+  const { year } = req.params;
+  try {
+    const byMonth = await pool.query(`
+      SELECT d.month,
+        COALESCE(mf.total_revenue,   d.dispatch_rev)              AS total_revenue,
+        COALESCE(mf.outsource_revenue, 0)                          AS outsource_revenue,
+        d.dispatch_rev                                             AS dispatch_revenue,
+        COALESCE(mf.total_salary_cost, d.salary_cost)             AS total_salary_cost,
+        COALESCE(mf.fixed_expense, 0)                             AS fixed_expense,
+        COALESCE(mf.other_expense, 0)                             AS other_expense,
+        COALESCE(mf.total_profit, d.dispatch_rev - d.salary_cost) AS total_profit,
+        CASE WHEN COALESCE(mf.total_revenue, d.dispatch_rev) > 0
+          THEN COALESCE(mf.total_profit, d.dispatch_rev - d.salary_cost)
+             / COALESCE(mf.total_revenue, d.dispatch_rev) ELSE 0 END AS profit_rate,
+        COALESCE(mf.notes,'') AS notes
+      FROM (SELECT month, SUM(revenue) AS dispatch_rev, SUM(cost) AS salary_cost
+            FROM monthly_dispatch WHERE year=$1 GROUP BY month) d
+      LEFT JOIN monthly_finance mf ON mf.year=$1 AND mf.month=d.month
+      ORDER BY d.month
+    `, [year]);
+
+    const empDetail = await pool.query(`
+      SELECT e.name, e.employee_type, e.project,
+        md.month, md.dispatch_days, md.revenue, md.cost, md.profit, md.profit_ratio, md.status
+      FROM monthly_dispatch md
+      JOIN employees e ON md.employee_id = e.id
+      WHERE md.year=$1 ORDER BY e.name, md.month
+    `, [year]);
+
+    const empAnnual = await pool.query(`
+      SELECT e.name, e.employee_type, e.project,
+        SUM(md.dispatch_days) as total_days,
+        SUM(md.revenue) as total_revenue,
+        SUM(md.cost)    as total_cost,
+        SUM(md.profit)  as total_profit,
+        CASE WHEN SUM(md.revenue)>0 THEN SUM(md.profit)/SUM(md.revenue) ELSE 0 END as avg_ratio
+      FROM monthly_dispatch md
+      JOIN employees e ON md.employee_id = e.id
+      WHERE md.year=$1
+      GROUP BY e.id, e.name, e.employee_type, e.project
+      ORDER BY total_profit DESC
+    `, [year]);
+
+    const wb = XLSX.utils.book_new();
+    const n2 = v => parseFloat(v||0).toFixed(2);
+    const pct = v => (parseFloat(v||0)*100).toFixed(1)+'%';
+    const mnames = ['','1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+    // Sheet1：月度财务汇总
+    const s1 = [[`${year}年 月度财务汇总`],[],
+      ['月份','总收入','外派收入','外包收入','工资成本','固定开支','其他支出','净利润','利润率','备注']];
+    let yr=0, yp=0;
+    for (const r of byMonth.rows) {
+      yr += parseFloat(r.total_revenue||0);
+      yp += parseFloat(r.total_profit||0);
+      s1.push([mnames[r.month], n2(r.total_revenue), n2(r.dispatch_revenue), n2(r.outsource_revenue),
+        n2(r.total_salary_cost), n2(r.fixed_expense), n2(r.other_expense),
+        n2(r.total_profit), pct(r.profit_rate), r.notes||'']);
+    }
+    s1.push([]);
+    s1.push(['全年合计', n2(yr),'','','','','', n2(yp), yr>0?pct(yp/yr):'0.0%','']);
+    const ws1 = XLSX.utils.aoa_to_sheet(s1);
+    ws1['!cols'] = [8,12,12,12,12,10,10,12,8,20].map(w=>({wch:w}));
+    ws1['!merges'] = [{s:{r:0,c:0},e:{r:0,c:9}}];
+    XLSX.utils.book_append_sheet(wb, ws1, '月度财务汇总');
+
+    // Sheet2：员工年度收益排行
+    const s2 = [[`${year}年 员工年度收益排行`],[],
+      ['排名','姓名','类型','项目组','年度人天','年度结算额','年度成本','年度盈利','平均收益比']];
+    empAnnual.rows.forEach((r,i) => s2.push([
+      i+1, r.name, r.employee_type||'外派', r.project||'',
+      n2(r.total_days), n2(r.total_revenue), n2(r.total_cost), n2(r.total_profit), pct(r.avg_ratio)
+    ]));
+    const ws2 = XLSX.utils.aoa_to_sheet(s2);
+    ws2['!cols'] = [6,10,6,10,8,12,12,12,10].map(w=>({wch:w}));
+    ws2['!merges'] = [{s:{r:0,c:0},e:{r:0,c:8}}];
+    XLSX.utils.book_append_sheet(wb, ws2, '员工年度收益');
+
+    // Sheet3：员工月度明细
+    const s3 = [[`${year}年 员工月度外派明细`],[],
+      ['姓名','类型','项目组','月份','结算人天','结算金额','成本','盈利','收益比','状态']];
+    let lastEmp = null;
+    for (const r of empDetail.rows) {
+      if (lastEmp && lastEmp !== r.name) s3.push([]);
+      s3.push([r.name, r.employee_type||'外派', r.project||'', mnames[r.month],
+        n2(r.dispatch_days), n2(r.revenue), n2(r.cost), n2(r.profit), pct(r.profit_ratio), r.status||'']);
+      lastEmp = r.name;
+    }
+    const ws3 = XLSX.utils.aoa_to_sheet(s3);
+    ws3['!cols'] = [10,6,10,6,8,12,12,12,8,8].map(w=>({wch:w}));
+    ws3['!merges'] = [{s:{r:0,c:0},e:{r:0,c:9}}];
+    XLSX.utils.book_append_sheet(wb, ws3, '员工月度明细');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(year+'年财务数据.xlsx')}`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buf);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -358,29 +358,55 @@ function renderAnnualEmpTable() {
   });
 
   const sa = (k) => sortArrow(k, annualSortKey, annualSortDesc);
-  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap';
+  const th = 'cursor:pointer;user-select:none;white-space:nowrap';
 
-  document.getElementById('annualEmpThead').innerHTML = `
-    <tr>
-      <th>排名</th><th>姓名</th><th>类型</th>
-      <th style="${thStyle}" onclick="sortAnnualBy('total_days')">年度人天 ${sa('total_days')}</th>
-      <th style="${thStyle}" onclick="sortAnnualBy('total_revenue')">年度结算额 ${sa('total_revenue')}</th>
-      <th style="${thStyle}" onclick="sortAnnualBy('total_profit')">年度盈利 ${sa('total_profit')}</th>
-      <th style="${thStyle}" onclick="sortAnnualBy('avg_ratio')">平均收益比 ${sa('avg_ratio')}</th>
-    </tr>`;
+  document.getElementById('annualEmpThead').innerHTML = `<tr>
+    <th>排名</th><th>姓名</th><th>类型</th>
+    <th style="${th}" onclick="sortAnnualBy('total_days')">年度人天 ${sa('total_days')}</th>
+    <th style="${th}" onclick="sortAnnualBy('total_revenue')">年度结算额 ${sa('total_revenue')}</th>
+    <th style="${th}" onclick="sortAnnualBy('total_cost')">年度成本 ${sa('total_cost')}</th>
+    <th style="${th}" onclick="sortAnnualBy('total_profit')">年度盈利 ${sa('total_profit')}</th>
+    <th style="${th}" onclick="sortAnnualBy('avg_ratio')">平均收益比 ${sa('avg_ratio')}</th>
+  </tr>`;
 
-  const tbody = document.getElementById('annualEmpBody');
-  tbody.innerHTML = rows.length ? rows.map((r, i) => `
+  document.getElementById('annualEmpBody').innerHTML = rows.length ? rows.map((r, i) => `
     <tr>
       <td style="color:var(--gray-400);font-weight:600">${i+1}</td>
       <td style="font-weight:600">${r.name}</td>
       <td>${typeBadge(r.employee_type)}</td>
-      <td>${parseFloat(r.total_days).toFixed(1)} 天</td>
+      <td>${parseFloat(r.total_days||0).toFixed(1)} 天</td>
       <td>${fmt(r.total_revenue)}</td>
+      <td>${fmt(r.total_cost)}</td>
       <td style="font-weight:700;color:${parseFloat(r.total_profit)>=0?'var(--success)':'var(--danger)'}">${fmt(r.total_profit)}</td>
       <td>${ratioBadge(r.avg_ratio)}</td>
     </tr>`).join('')
-    : '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--gray-500)">暂无数据</td></tr>';
+    : '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--gray-500)">暂无数据</td></tr>';
+}
+
+// ===== 导出 Excel =====
+async function exportExcel() {
+  const year = document.getElementById('annualYear')?.value || document.getElementById('selYear').value;
+  const btn = event.target;
+  btn.textContent = '导出中...';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/finance/export/${year}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('导出失败');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${year}年财务数据.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('导出失败：' + e.message);
+  } finally {
+    btn.textContent = '↓ 导出 Excel';
+    btn.disabled = false;
+  }
 }
 
 function renderAnnualMonthTable(months) {

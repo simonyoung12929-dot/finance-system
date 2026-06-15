@@ -67,9 +67,12 @@
 
     <!-- 总览页 -->
     <div class="page active" id="page-dashboard">
-      <div class="page-header">
-        <h1>总览仪表盘</h1>
-        <p id="dashboardSubtitle">加载中...</p>
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <h1>总览仪表盘</h1>
+          <p id="dashboardSubtitle">加载中...</p>
+        </div>
+        <button class="btn-secondary btn-sm" onclick="exportExcel()" style="white-space:nowrap;margin-top:4px">↓ 导出 Excel</button>
       </div>
 
       <div class="stats-grid">
@@ -125,10 +128,13 @@
         <p>查看全年财务汇总与员工年度收益</p>
       </div>
 
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
         <label style="font-size:14px;color:var(--gray-600)">选择年份：</label>
         <select id="annualYear" style="padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px;"></select>
         <button class="btn-primary btn-sm" onclick="loadAnnual()">查看年报</button>
+        <button class="btn-secondary btn-sm" onclick="exportExcel()" style="margin-left:auto">
+          ↓ 导出 Excel
+        </button>
       </div>
 
       <div class="stats-grid" id="annualStats" style="display:none">
