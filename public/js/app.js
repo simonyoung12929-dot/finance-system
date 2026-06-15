@@ -508,7 +508,8 @@ function calcManualPreview() {
   const days = parseFloat(document.getElementById('manualDays').value) || 0;
   const cost = parseFloat(document.getElementById('manualCost').value) || 0;
   if (!emp || !days) { document.getElementById('manualCalcResult').style.display = 'none'; return; }
-  const revenue = days * parseFloat(emp.daily_rate);
+  const manualRev = document.getElementById('manualRevenue').value;
+  const revenue = manualRev !== '' ? parseFloat(manualRev) || 0 : days * parseFloat(emp.daily_rate);
   const profit = revenue - cost;
   const ratio = revenue > 0 ? profit / revenue : 0;
   document.getElementById('calcRevenue').textContent = fmt(revenue);
@@ -524,12 +525,14 @@ async function submitManualEntry() {
   const employee_id = document.getElementById('manualEmployee').value;
   const dispatch_days = document.getElementById('manualDays').value;
   const cost = document.getElementById('manualCost').value;
+  const revenueInput = document.getElementById('manualRevenue').value;
+  const revenue = revenueInput !== '' ? revenueInput : undefined;
   const status = document.getElementById('manualStatus').value;
   const notes = document.getElementById('manualNotes').value;
   const msg = document.getElementById('manualMsg');
   if (!employee_id || !dispatch_days) { msg.innerHTML = '<span style="color:var(--danger)">请选择员工并填写人天数</span>'; return; }
   try {
-    await api('POST', '/finance/dispatch', { employee_id, year, month, dispatch_days, cost, status, notes });
+    await api('POST', '/finance/dispatch', { employee_id, year, month, dispatch_days, cost, revenue, status, notes });
     msg.innerHTML = '<span style="color:var(--success)">✓ 保存成功</span>';
     setTimeout(() => msg.innerHTML = '', 3000);
   } catch(e) { msg.innerHTML = '<span style="color:var(--danger)">保存失败</span>'; }

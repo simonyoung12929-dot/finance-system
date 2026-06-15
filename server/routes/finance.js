@@ -92,16 +92,17 @@ router.post('/monthly', auth, async (req, res) => {
   }
 });
 
-// 录入/更新单个员工当月数据
+// 录入/更新单个员工当月数据（revenue 以传入值为准，不传则用日薪×天数）
 router.post('/dispatch', auth, async (req, res) => {
-  const { employee_id, year, month, dispatch_days, adjusted_days, cost, status, notes } = req.body;
+  const { employee_id, year, month, dispatch_days, adjusted_days, revenue: inputRevenue, cost, status, notes } = req.body;
   try {
     const emp = await pool.query('SELECT daily_rate FROM employees WHERE id=$1', [employee_id]);
     if (!emp.rows[0]) return res.status(404).json({ error: '员工不存在' });
 
     const daily_rate = parseFloat(emp.rows[0].daily_rate);
     const adj = parseFloat(adjusted_days || dispatch_days);
-    const revenue = adj * daily_rate;
+    // 优先用手动填入的结算金额，没填则用日薪×天数估算
+    const revenue = inputRevenue !== undefined && inputRevenue !== '' ? parseFloat(inputRevenue) : adj * daily_rate;
     const c = parseFloat(cost || 0);
     const profit = revenue - c;
     const profit_ratio = revenue > 0 ? profit / revenue : 0;
@@ -120,8 +121,132 @@ router.post('/dispatch', auth, async (req, res) => {
   }
 });
 
-// 上传Excel文件解析员工数据（参考"3.21"表格格式）
-// 支持全年批量导入：自动遍历所有12个月，跳过无数据的月份
+// ===== Excel格式解析工具函数 =====
+
+// 把各种月份表示统一转为数字 1-12，失败返回 null
+function parseMonth(v) {
+  if (!v) return null;
+  const s = v.toString().trim();
+  const direct = parseInt(s);
+  if (direct >= 1 && direct <= 12) return direct;
+  const m = s.match(/(\d+)\s*月/);
+  if (m) { const n = parseInt(m[1]); if (n >= 1 && n <= 12) return n; }
+  return null;
+}
+
+// 判断字符串是否像"姓名"列
+function isNameCol(s) { return /姓名|名字|员工|人员|派驻|staff|name/i.test(s); }
+function isMonthCol(s) { return /月份|月|month/i.test(s); }
+function isDaysCol(s)  { return /人天|天数|工作日|days/i.test(s); }
+function isRevCol(s)   { return /结算金额|金额|收入|结算额|revenue|amount/i.test(s); }
+function isCostCol(s)  { return /成本|工资|费用|cost/i.test(s); }
+function isProfitCol(s){ return /盈利|利润|profit/i.test(s); }
+function isRatioCol(s) { return /比例|收益比|利润率|ratio/i.test(s); }
+function isRateCol(s)  { return /单价|日薪|日费|单位.*价|price|rate/i.test(s); }
+
+// 格式A：宽表（3.21样式）— 行=员工，每5列=一个月
+function tryWideFormat(data, year) {
+  const rows = [];
+  // 找第一行有数字单价的行（跳过空行和标题行）
+  let dataStart = 0;
+  for (let i = 0; i < Math.min(5, data.length); i++) {
+    if (data[i] && parseFloat(data[i][1]) > 0) { dataStart = i; break; }
+  }
+  for (let i = dataStart; i < data.length; i++) {
+    const row = data[i];
+    const name = row[0]?.toString().trim();
+    if (!name || name.length > 20) continue;
+    const daily_rate = parseFloat(row[1]) || 0;
+    if (!daily_rate) continue;
+    for (let mi = 0; mi < 12; mi++) {
+      const off = 2 + mi * 5;
+      if (off + 4 >= row.length && !row[off]) continue;
+      const days = parseFloat(row[off]) || 0;
+      if (!days) continue;
+      const revenue    = parseFloat(row[off+1]) || 0;
+      const cost       = parseFloat(row[off+2]) || 0;
+      const profit     = parseFloat(row[off+3]) || (revenue - cost);
+      const profit_ratio = parseFloat(row[off+4]) || (revenue > 0 ? profit/revenue : 0);
+      rows.push({ name, daily_rate, month: mi+1, dispatch_days: days, revenue, cost, profit, profit_ratio });
+    }
+  }
+  return rows.length ? { format: 'wide-multi-month', rows } : null;
+}
+
+// 格式B：长表（每行=员工+月份，有表头）
+function tryLongFormat(data) {
+  // 找表头行
+  let headerRow = -1, headers = [];
+  for (let i = 0; i < Math.min(10, data.length); i++) {
+    const row = data[i].map(v => v?.toString() || '');
+    if (row.some(isNameCol) && (row.some(isMonthCol) || row.some(isDaysCol) || row.some(isRevCol))) {
+      headerRow = i; headers = row; break;
+    }
+  }
+  if (headerRow < 0) return null;
+
+  const ci = {
+    name:   headers.findIndex(isNameCol),
+    month:  headers.findIndex(isMonthCol),
+    days:   headers.findIndex(isDaysCol),
+    rev:    headers.findIndex(isRevCol),
+    cost:   headers.findIndex(isCostCol),
+    profit: headers.findIndex(isProfitCol),
+    ratio:  headers.findIndex(isRatioCol),
+    rate:   headers.findIndex(isRateCol),
+  };
+  if (ci.name < 0) return null;
+
+  const rows = [];
+  for (let i = headerRow + 1; i < data.length; i++) {
+    const row = data[i];
+    const name = row[ci.name]?.toString().trim();
+    if (!name || name.length > 20) continue;
+    const month = ci.month >= 0 ? parseMonth(row[ci.month]) : null;
+    const days   = ci.days   >= 0 ? parseFloat(row[ci.days])   || 0 : 0;
+    const rev    = ci.rev    >= 0 ? parseFloat(row[ci.rev])    || 0 : 0;
+    const cost   = ci.cost   >= 0 ? parseFloat(row[ci.cost])   || 0 : 0;
+    const profit = ci.profit >= 0 ? parseFloat(row[ci.profit]) || (rev - cost) : rev - cost;
+    const ratio  = ci.ratio  >= 0 ? parseFloat(row[ci.ratio])  || (rev>0?profit/rev:0) : (rev>0?profit/rev:0);
+    const rate   = ci.rate   >= 0 ? parseFloat(row[ci.rate])   || 0 : 0;
+    if (!month && days === 0 && rev === 0) continue;
+    rows.push({ name, daily_rate: rate, month, dispatch_days: days, revenue: rev, cost, profit, profit_ratio: ratio });
+  }
+  return rows.length ? { format: 'long-with-header', rows } : null;
+}
+
+// 格式C：按月分Sheet（每个Sheet是一个月）
+function trySheetPerMonth(wb) {
+  const rows = [];
+  for (const sheetName of wb.SheetNames) {
+    const month = parseMonth(sheetName);
+    if (!month) continue;
+    const ws = wb.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    // 在这个Sheet里找表头或直接读数据
+    const headerIdx = data.findIndex(r => r.some(c => isNameCol(c?.toString()||'')));
+    if (headerIdx >= 0) {
+      const h = data[headerIdx].map(v=>v?.toString()||'');
+      const ci = { name: h.findIndex(isNameCol), days: h.findIndex(isDaysCol), rev: h.findIndex(isRevCol), cost: h.findIndex(isCostCol), profit: h.findIndex(isProfitCol), ratio: h.findIndex(isRatioCol) };
+      if (ci.name < 0) continue;
+      for (let i = headerIdx+1; i < data.length; i++) {
+        const row = data[i];
+        const name = row[ci.name]?.toString().trim();
+        if (!name || name.length > 20) continue;
+        const days   = ci.days   >= 0 ? parseFloat(row[ci.days])   || 0 : 0;
+        const rev    = ci.rev    >= 0 ? parseFloat(row[ci.rev])    || 0 : 0;
+        const cost   = ci.cost   >= 0 ? parseFloat(row[ci.cost])   || 0 : 0;
+        const profit = ci.profit >= 0 ? parseFloat(row[ci.profit]) || (rev-cost) : rev-cost;
+        const ratio  = ci.ratio  >= 0 ? parseFloat(row[ci.ratio])  || (rev>0?profit/rev:0) : (rev>0?profit/rev:0);
+        if (!days && !rev) continue;
+        rows.push({ name, daily_rate: 0, month, dispatch_days: days, revenue: rev, cost, profit, profit_ratio: ratio });
+      }
+    }
+  }
+  return rows.length ? { format: 'sheet-per-month', rows } : null;
+}
+
+// 上传Excel文件 — 自动识别格式，支持宽表/长表/分Sheet
 router.post('/upload-excel', auth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: '请上传文件' });
   const { year } = req.body;
@@ -129,67 +254,65 @@ router.post('/upload-excel', auth, upload.single('file'), async (req, res) => {
 
   try {
     const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+
+    // 按优先级尝试格式
+    let parsed = null;
+
+    // 优先找含 3.21/结算/总表 的sheet做宽表尝试
+    const mainSheet = wb.SheetNames.find(n => /3\.21|结算|汇总|总表|全年/i.test(n)) || wb.SheetNames[0];
+    const mainData  = XLSX.utils.sheet_to_json(wb.Sheets[mainSheet], { header: 1, defval: '' });
+
+    parsed = tryWideFormat(mainData, year);
+    if (!parsed) parsed = tryLongFormat(mainData);
+    if (!parsed) {
+      // 其它所有sheet逐一尝试长表
+      for (const name of wb.SheetNames) {
+        if (name === mainSheet) continue;
+        const d = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+        parsed = tryWideFormat(d, year) || tryLongFormat(d);
+        if (parsed) break;
+      }
+    }
+    if (!parsed) parsed = trySheetPerMonth(wb);
+    if (!parsed) return res.status(400).json({ error: '无法识别表格格式，请确认表格包含：姓名、月份/人天、结算金额、成本等列' });
+
+    const { format, rows } = parsed;
     const totalImported = [];
-    const errors = [];
 
-    const targetSheet = wb.SheetNames.find(n => n.includes('3.21') || n.includes('结算')) || wb.SheetNames[0];
-    const ws = wb.Sheets[targetSheet];
-    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (const r of rows) {
+      if (!r.name) continue;
+      // 长表中 month 可能为 null（没有月份列），跳过
+      if (!r.month) continue;
 
-    // 遍历全年12个月
-    for (let monthIdx = 0; monthIdx < 12; monthIdx++) {
-      const month = monthIdx + 1;
-      const colOffset = 2 + monthIdx * 5; // 每月5列: 人天,金额,成本,盈利,比例
-
-      const monthResults = [];
-      for (let i = 2; i < data.length; i++) {
-        const row = data[i];
-        const name = row[0]?.toString().trim();
-        const daily_rate = parseFloat(row[1]) || 0;
-        if (!name || !daily_rate) continue;
-
-        const dispatch_days = parseFloat(row[colOffset]) || 0;
-        if (dispatch_days === 0) continue;
-
-        const revenue = parseFloat(row[colOffset + 1]) || 0;
-        const cost = parseFloat(row[colOffset + 2]) || 0;
-        const profit = parseFloat(row[colOffset + 3]) || 0;
-        const profit_ratio = parseFloat(row[colOffset + 4]) || 0;
-
-        // 查找或创建员工
-        let empResult = await pool.query('SELECT id FROM employees WHERE name=$1', [name]);
-        let emp_id;
-        if (empResult.rows.length === 0) {
-          const newEmp = await pool.query(
-            'INSERT INTO employees (name, daily_rate) VALUES ($1,$2) RETURNING id',
-            [name, daily_rate]
-          );
-          emp_id = newEmp.rows[0].id;
-        } else {
-          emp_id = empResult.rows[0].id;
-          await pool.query('UPDATE employees SET daily_rate=$1 WHERE id=$2', [daily_rate, emp_id]);
+      let empResult = await pool.query('SELECT id FROM employees WHERE name=$1', [r.name]);
+      let emp_id;
+      if (empResult.rows.length === 0) {
+        const newEmp = await pool.query(
+          'INSERT INTO employees (name, daily_rate) VALUES ($1,$2) RETURNING id',
+          [r.name, r.daily_rate || 0]
+        );
+        emp_id = newEmp.rows[0].id;
+      } else {
+        emp_id = empResult.rows[0].id;
+        if (r.daily_rate > 0) {
+          await pool.query('UPDATE employees SET daily_rate=$1 WHERE id=$2', [r.daily_rate, emp_id]);
         }
-
-        await pool.query(`
-          INSERT INTO monthly_dispatch (employee_id, year, month, dispatch_days, adjusted_days, revenue, cost, profit, profit_ratio)
-          VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8)
-          ON CONFLICT (employee_id, year, month) DO UPDATE SET
-            dispatch_days=$4, adjusted_days=$4, revenue=$5, cost=$6, profit=$7, profit_ratio=$8
-        `, [emp_id, year, month, dispatch_days, revenue, cost, profit, profit_ratio]);
-
-        monthResults.push({ month, name, dispatch_days, revenue, cost, profit, profit_ratio });
       }
 
-      totalImported.push(...monthResults);
+      await pool.query(`
+        INSERT INTO monthly_dispatch (employee_id, year, month, dispatch_days, adjusted_days, revenue, cost, profit, profit_ratio)
+        VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8)
+        ON CONFLICT (employee_id, year, month) DO UPDATE SET
+          dispatch_days=$4, adjusted_days=$4, revenue=$5, cost=$6, profit=$7, profit_ratio=$8
+      `, [emp_id, year, r.month, r.dispatch_days, r.revenue, r.cost, r.profit, r.profit_ratio]);
+
+      totalImported.push({ month: r.month, name: r.name, dispatch_days: r.dispatch_days, revenue: r.revenue, cost: r.cost, profit: r.profit, profit_ratio: r.profit_ratio });
     }
 
-    // 按月汇总导入数量
     const summary = {};
-    for (const r of totalImported) {
-      summary[r.month] = (summary[r.month] || 0) + 1;
-    }
+    for (const r of totalImported) summary[r.month] = (summary[r.month] || 0) + 1;
 
-    res.json({ imported: totalImported.length, summary, data: totalImported, errors });
+    res.json({ imported: totalImported.length, format, summary, data: totalImported, errors: [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

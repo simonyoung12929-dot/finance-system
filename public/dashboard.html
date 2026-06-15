@@ -330,6 +330,10 @@
             <input type="number" id="manualCost" step="0.01" min="0" oninput="calcManualPreview()" placeholder="0.00">
           </div>
         </div>
+        <div class="form-group" style="margin-top:10px;">
+          <label>结算金额（元）<span style="font-weight:400;color:var(--gray-500);font-size:12px;">  留空则按人天×单价自动计算</span></label>
+          <input type="number" id="manualRevenue" step="0.01" min="0" oninput="calcManualPreview()" placeholder="如需覆盖自动计算请填写">
+        </div>
 
         <div id="manualCalcResult" style="display:none; margin: 12px 0; padding: 14px; background: var(--gray-50); border-radius:8px;">
           <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; text-align:center;">
