@@ -49,6 +49,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft
 .btn-secondary:hover { border-color: var(--primary); color: var(--primary); }
 .btn-danger { background: var(--danger); color: white; border: none; border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
 .btn-sm { padding: 6px 12px; font-size: 13px; }
+.editable-cell { cursor: pointer; }
+.editable-cell:hover { background: var(--gray-50); }
+.inline-input { width: 100%; padding: 4px 8px; border: 1.5px solid var(--primary); border-radius: 6px; font-size: 13px; background: white; box-sizing: border-box; }
 
 /* === 错误/成功 === */
 .error-msg { color: var(--danger); font-size: 13px; padding: 8px 12px; background: #fef2f2; border-radius: 6px; margin-top: 4px; }

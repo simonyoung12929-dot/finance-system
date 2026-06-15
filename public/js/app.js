@@ -1,8 +1,15 @@
 const API = '/api';
 let token = localStorage.getItem('token');
 let currentYear, currentMonth;
+let currentPage = 'dashboard';
 let employees = [];
 let annualEmpData = [];
+let empTableData = [];  // 当前月员工数据（供排序用）
+let empMgmtCache = []; // 员工管理页缓存
+let empSortKey = 'profit_ratio';
+let empSortDesc = true;
+let annualSortKey = 'total_profit';
+let annualSortDesc = true;
 let pieChart, trendChart, empBarChart, annualTrendChart;
 
 // ===== 初始化 =====
@@ -33,12 +40,10 @@ let pieChart, trendChart, empBarChart, annualTrendChart;
   document.getElementById('selMonth').value = currentMonth;
   document.getElementById('manualMonth').value = currentMonth;
 
-  // 侧边栏导航
   document.querySelectorAll('.nav-item[data-page]').forEach(item => {
     item.addEventListener('click', () => switchPage(item.dataset.page));
   });
 
-  // 拖拽上传
   const zone = document.getElementById('uploadZone');
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
@@ -48,7 +53,6 @@ let pieChart, trendChart, empBarChart, annualTrendChart;
     if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
   });
 
-  // 员工选择联动
   document.getElementById('manualEmployee').addEventListener('change', function() {
     const emp = employees.find(e => e.id == this.value);
     if (emp) {
@@ -60,7 +64,6 @@ let pieChart, trendChart, empBarChart, annualTrendChart;
     }
   });
 
-  // 清除预览联动
   ['clearYear', 'clearMonth', 'clearEmployee'].forEach(id => {
     document.getElementById(id)?.addEventListener('change', updateClearPreview);
   });
@@ -69,12 +72,7 @@ let pieChart, trendChart, empBarChart, annualTrendChart;
   loadCurrentMonth();
 })();
 
-function logout() {
-  localStorage.clear();
-  window.location.href = '/';
-}
-
-let currentPage = 'dashboard';
+function logout() { localStorage.clear(); window.location.href = '/'; }
 
 function switchPage(page) {
   currentPage = page;
@@ -83,7 +81,6 @@ function switchPage(page) {
   document.getElementById('page-' + page).classList.add('active');
   document.querySelector(`[data-page="${page}"]`).classList.add('active');
 
-  // 员工管理和数据管理不需要月份选择栏
   const hideBar = page === 'employees' || page === 'data-manage';
   document.getElementById('monthSelectorBar').style.display = hideBar ? 'none' : '';
 
@@ -93,7 +90,6 @@ function switchPage(page) {
   if (page === 'data-manage') loadDataManage();
 }
 
-// 查询按钮根据当前页面执行对应刷新
 function queryCurrentPage() {
   if (currentPage === 'dashboard') loadCurrentMonth();
   else if (currentPage === 'employees-profit') { loadCurrentMonth(); loadEmployeeProfit(); }
@@ -101,12 +97,9 @@ function queryCurrentPage() {
   else loadCurrentMonth();
 }
 
-// ===== API 请求 =====
+// ===== API =====
 async function api(method, path, body) {
-  const opts = {
-    method,
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-  };
+  const opts = { method, headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
   if (res.status === 401) { localStorage.clear(); window.location.href = '/'; }
@@ -114,26 +107,23 @@ async function api(method, path, body) {
 }
 
 async function apiUpload(path, formData) {
-  const res = await fetch(API + path, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}` },
-    body: formData
-  });
+  const res = await fetch(API + path, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
   if (res.status === 401) { localStorage.clear(); window.location.href = '/'; }
   return res.json();
 }
 
 // ===== 格式化 =====
 function fmt(n) {
-  if (n === null || n === undefined || isNaN(n)) return '--';
+  if (n === null || n === undefined || isNaN(parseFloat(n))) return '--';
   return '¥' + parseFloat(n).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 function fmtRatio(n) {
-  if (n === null || n === undefined || isNaN(n)) return '--';
+  if (n === null || n === undefined || isNaN(parseFloat(n))) return '--';
   return (parseFloat(n) * 100).toFixed(1) + '%';
 }
 function ratioBadge(r) {
   const pct = parseFloat(r) * 100;
+  if (isNaN(pct)) return '<span class="ratio-badge ratio-low">--</span>';
   if (pct >= 35) return `<span class="ratio-badge ratio-high">${fmtRatio(r)}</span>`;
   if (pct >= 10) return `<span class="ratio-badge ratio-mid">${fmtRatio(r)}</span>`;
   return `<span class="ratio-badge ratio-low">${fmtRatio(r)}</span>`;
@@ -147,16 +137,18 @@ function statusTag(s) {
   return `<span class="tag ${map[s] || 'tag-pending'}">${s || '--'}</span>`;
 }
 function getSelYearMonth() {
-  return {
-    year: document.getElementById('selYear').value,
-    month: document.getElementById('selMonth').value
-  };
+  return { year: document.getElementById('selYear').value, month: document.getElementById('selMonth').value };
+}
+function sortArrow(key, currentKey, desc) {
+  if (key !== currentKey) return '<span style="color:var(--gray-300);font-size:10px">⇅</span>';
+  return desc ? '↓' : '↑';
 }
 
-// ===== 加载员工列表 =====
+// ===== 员工列表 =====
 async function loadEmployees() {
   try {
-    employees = await api('GET', '/employees');
+    const all = await api('GET', '/employees');
+    employees = all.filter(e => !e.resigned_date && e.is_active !== false);
     updateEmployeeSelects();
     updateClearEmployeeSelect();
   } catch (e) { console.error(e); }
@@ -187,19 +179,19 @@ function updateClearEmployeeSelect() {
   });
 }
 
-// ===== 加载当月数据 =====
+// ===== 月度仪表盘 =====
 async function loadCurrentMonth() {
   const { year, month } = getSelYearMonth();
   currentYear = year; currentMonth = month;
-  const data = await api('GET', `/finance/summary/${year}/${month}`);
-  renderDashboard(data, year, month);
-  loadTrend();
+  try {
+    const data = await api('GET', `/finance/summary/${year}/${month}`);
+    renderDashboard(data, year, month);
+    loadTrend();
+  } catch(e) { console.error(e); }
 }
 
 function renderDashboard(data, year, month) {
-  const label = `${year}年${month}月`;
-  document.getElementById('dashboardSubtitle').textContent = label + ' 财务汇总';
-
+  document.getElementById('dashboardSubtitle').textContent = `${year}年${month}月 财务汇总`;
   const f = data.finance;
   if (f) {
     const profit = parseFloat(f.total_profit);
@@ -210,7 +202,6 @@ function renderDashboard(data, year, month) {
     document.getElementById('revenueBreakdown').textContent = `外派 ${fmt(f.total_revenue - f.outsource_revenue)} + 外包 ${fmt(f.outsource_revenue)}`;
     document.getElementById('salaryCost').textContent = fmt(f.total_salary_cost);
     document.getElementById('otherExpense').textContent = fmt(parseFloat(f.fixed_expense) + parseFloat(f.other_expense));
-
     document.getElementById('financeDetail').innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;font-size:13px;">
         <div><span style="color:var(--gray-500)">外包收入：</span><strong>${fmt(f.outsource_revenue)}</strong></div>
@@ -218,15 +209,13 @@ function renderDashboard(data, year, month) {
         <div><span style="color:var(--gray-500)">变动支出：</span><strong>${fmt(f.other_expense)}</strong></div>
         ${f.notes ? `<div style="grid-column:1/-1;color:var(--gray-500)">备注：${f.notes}</div>` : ''}
       </div>`;
-
     renderPieChart(f);
   } else {
     ['totalProfit','totalRevenue','salaryCost','otherExpense'].forEach(id => document.getElementById(id).textContent = '--');
-    document.getElementById('financeDetail').innerHTML = '<p style="color:var(--gray-500)">暂无本月财务数据</p>';
+    document.getElementById('financeDetail').innerHTML = '<p style="color:var(--gray-500)">暂无本月财务数据，请先上传数据或录入外包收入</p>';
   }
 }
 
-// ===== 饼图 =====
 function renderPieChart(f) {
   const ctx = document.getElementById('expensePieChart').getContext('2d');
   if (pieChart) pieChart.destroy();
@@ -236,15 +225,11 @@ function renderPieChart(f) {
   const profit = Math.max(0, parseFloat(f.total_profit) || 0);
   pieChart = new Chart(ctx, {
     type: 'doughnut',
-    data: {
-      labels: ['员工工资', '固定开支', '其他支出', '利润'],
-      datasets: [{ data: [salary, fixed, other, profit], backgroundColor: ['#3b82f6','#f59e0b','#ef4444','#22c55e'], borderWidth: 0 }]
-    },
-    options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 12 } } } }, cutout: '60%' }
+    data: { labels: ['员工工资','固定开支','其他支出','利润'], datasets: [{ data:[salary,fixed,other,profit], backgroundColor:['#3b82f6','#f59e0b','#ef4444','#22c55e'], borderWidth:0 }] },
+    options: { plugins: { legend: { position:'bottom', labels:{ font:{size:12} } } }, cutout:'60%' }
   });
 }
 
-// ===== 趋势图 =====
 async function loadTrend() {
   const trend = await api('GET', '/finance/trend');
   const ctx = document.getElementById('trendChart').getContext('2d');
@@ -255,14 +240,11 @@ async function loadTrend() {
     data: {
       labels: trend.map(t => `${t.year}/${t.month}`),
       datasets: [
-        { label: '总收入', data: trend.map(t => t.total_revenue), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.3, fill: true },
-        { label: '净利润', data: trend.map(t => t.total_profit), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.3, fill: true }
+        { label:'总收入', data:trend.map(t=>t.total_revenue), borderColor:'#3b82f6', backgroundColor:'rgba(59,130,246,0.1)', tension:0.3, fill:true },
+        { label:'净利润', data:trend.map(t=>t.total_profit), borderColor:'#22c55e', backgroundColor:'rgba(34,197,94,0.1)', tension:0.3, fill:true }
       ]
     },
-    options: {
-      plugins: { legend: { position: 'bottom' } },
-      scales: { y: { ticks: { callback: v => '¥' + (v/10000).toFixed(0) + 'w' } } }
-    }
+    options: { plugins:{legend:{position:'bottom'}}, scales:{y:{ticks:{callback:v=>'¥'+(v/10000).toFixed(0)+'w'}}} }
   });
 }
 
@@ -271,118 +253,159 @@ async function loadAnnual() {
   const sel = document.getElementById('annualYear');
   if (!sel) return;
   const year = sel.value;
-  const data = await api('GET', `/finance/annual/${year}`);
-  if (data.error) return;
+  try {
+    const data = await api('GET', `/finance/annual/${year}`);
+    if (data.error) { console.error(data.error); return; }
 
-  annualEmpData = data.topEmployees || [];
+    annualEmpData = data.topEmployees || [];
+    const s = data.summary;
 
-  const s = data.summary;
-  document.getElementById('annualStats').style.display = 'grid';
-  document.getElementById('annualCharts').style.display = 'grid';
-  document.getElementById('annualEmpCard').style.display = 'block';
-  document.getElementById('annualMonthCard').style.display = 'block';
+    document.getElementById('annualStats').style.display = 'grid';
+    document.getElementById('annualCharts').style.display = 'grid';
+    document.getElementById('annualEmpCard').style.display = 'block';
+    document.getElementById('annualMonthCard').style.display = 'block';
 
-  document.getElementById('annualProfit').textContent = fmt(s.total_profit);
-  document.getElementById('annualProfit').className = 'value ' + (parseFloat(s.total_profit) >= 0 ? '' : 'loss');
-  document.getElementById('annualProfitRate').textContent = '利润率 ' + fmtRatio(s.profit_rate);
-  document.getElementById('annualRevenue').textContent = fmt(s.total_revenue);
-  document.getElementById('annualRevBreak').textContent = `外派 ${fmt(s.total_revenue - s.outsource_revenue)} + 外包 ${fmt(s.outsource_revenue)}`;
-  document.getElementById('annualSalary').textContent = fmt(s.total_salary_cost);
-  document.getElementById('annualMonthsCount').textContent = `共 ${s.months_count} 个月有数据`;
-  document.getElementById('annualExpense').textContent = fmt(parseFloat(s.fixed_expense) + parseFloat(s.other_expense));
-  document.getElementById('annualEmpTitle').textContent = `${year}年 员工年度收益排行`;
+    document.getElementById('annualProfit').textContent = fmt(s.total_profit);
+    document.getElementById('annualProfit').className = 'value ' + (parseFloat(s.total_profit) >= 0 ? '' : 'loss');
+    document.getElementById('annualProfitRate').textContent = '利润率 ' + fmtRatio(s.profit_rate);
+    document.getElementById('annualRevenue').textContent = fmt(s.total_revenue);
+    document.getElementById('annualRevBreak').textContent = `外派 ${fmt(s.total_revenue - s.outsource_revenue)} + 外包 ${fmt(s.outsource_revenue)}`;
+    document.getElementById('annualSalary').textContent = fmt(s.total_salary_cost);
+    document.getElementById('annualMonthsCount').textContent = `共 ${s.months_count} 个月有数据`;
+    document.getElementById('annualExpense').textContent = fmt(parseFloat(s.fixed_expense) + parseFloat(s.other_expense));
+    document.getElementById('annualEmpTitle').textContent = `${year}年 员工年度收益排行`;
 
-  // 月度趋势图
-  const ctx = document.getElementById('annualTrendChart').getContext('2d');
-  if (annualTrendChart) annualTrendChart.destroy();
-  const months = data.byMonth || [];
-  annualTrendChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: months.map(m => `${m.month}月`),
-      datasets: [
-        { label: '总收入', data: months.map(m => m.total_revenue), backgroundColor: '#bfdbfe', order: 2 },
-        { label: '净利润', data: months.map(m => m.total_profit), backgroundColor: months.map(m => parseFloat(m.total_profit) >= 0 ? '#22c55e' : '#ef4444'), order: 2 },
-        { type: 'line', label: '利润率', data: months.map(m => parseFloat(m.profit_rate) * 100), borderColor: '#f59e0b', yAxisID: 'y1', tension: 0.3, order: 1 }
-      ]
-    },
-    options: {
-      plugins: { legend: { position: 'bottom' } },
-      scales: {
-        y: { ticks: { callback: v => '¥' + (v/10000).toFixed(0) + 'w' } },
-        y1: { position: 'right', ticks: { callback: v => v.toFixed(0) + '%' }, grid: { drawOnChartArea: false } }
-      }
+    const ctx = document.getElementById('annualTrendChart').getContext('2d');
+    if (annualTrendChart) annualTrendChart.destroy();
+    const months = data.byMonth || [];
+    if (months.length) {
+      annualTrendChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: months.map(m => `${m.month}月`),
+          datasets: [
+            { label:'总收入', data:months.map(m=>m.total_revenue), backgroundColor:'#bfdbfe', order:2 },
+            { label:'净利润', data:months.map(m=>m.total_profit), backgroundColor:months.map(m=>parseFloat(m.total_profit)>=0?'#22c55e':'#ef4444'), order:2 },
+            { type:'line', label:'利润率', data:months.map(m=>parseFloat(m.profit_rate)*100), borderColor:'#f59e0b', yAxisID:'y1', tension:0.3, order:1 }
+          ]
+        },
+        options: {
+          plugins:{legend:{position:'bottom'}},
+          scales:{ y:{ticks:{callback:v=>'¥'+(v/10000).toFixed(0)+'w'}}, y1:{position:'right',ticks:{callback:v=>v.toFixed(0)+'%'},grid:{drawOnChartArea:false}} }
+        }
+      });
     }
-  });
 
+    renderAnnualEmpTable();
+    renderAnnualMonthTable(months);
+  } catch(e) { console.error('年报加载失败', e); }
+}
+
+function sortAnnualBy(key) {
+  if (annualSortKey === key) annualSortDesc = !annualSortDesc;
+  else { annualSortKey = key; annualSortDesc = true; }
   renderAnnualEmpTable();
-  renderAnnualMonthTable(months);
 }
 
 function renderAnnualEmpTable() {
   const filter = document.getElementById('annualEmpFilter').value;
-  const rows = filter ? annualEmpData.filter(e => e.employee_type === filter) : annualEmpData;
-  const tbody = document.getElementById('annualEmpBody');
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--gray-500)">暂无数据</td></tr>';
-    return;
-  }
-  tbody.innerHTML = rows.map((r, i) => `
+  let rows = filter ? annualEmpData.filter(e => e.employee_type === filter) : [...annualEmpData];
+  rows.sort((a, b) => {
+    const av = parseFloat(a[annualSortKey]) || 0;
+    const bv = parseFloat(b[annualSortKey]) || 0;
+    return annualSortDesc ? bv - av : av - bv;
+  });
+
+  const sa = (k) => sortArrow(k, annualSortKey, annualSortDesc);
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap';
+
+  document.getElementById('annualEmpThead').innerHTML = `
     <tr>
-      <td style="color:var(--gray-400);font-weight:600">${i + 1}</td>
+      <th>排名</th><th>姓名</th><th>类型</th>
+      <th style="${thStyle}" onclick="sortAnnualBy('total_days')">年度人天 ${sa('total_days')}</th>
+      <th style="${thStyle}" onclick="sortAnnualBy('total_revenue')">年度结算额 ${sa('total_revenue')}</th>
+      <th style="${thStyle}" onclick="sortAnnualBy('total_profit')">年度盈利 ${sa('total_profit')}</th>
+      <th style="${thStyle}" onclick="sortAnnualBy('avg_ratio')">平均收益比 ${sa('avg_ratio')}</th>
+    </tr>`;
+
+  const tbody = document.getElementById('annualEmpBody');
+  tbody.innerHTML = rows.length ? rows.map((r, i) => `
+    <tr>
+      <td style="color:var(--gray-400);font-weight:600">${i+1}</td>
       <td style="font-weight:600">${r.name}</td>
       <td>${typeBadge(r.employee_type)}</td>
       <td>${parseFloat(r.total_days).toFixed(1)} 天</td>
       <td>${fmt(r.total_revenue)}</td>
       <td style="font-weight:700;color:${parseFloat(r.total_profit)>=0?'var(--success)':'var(--danger)'}">${fmt(r.total_profit)}</td>
       <td>${ratioBadge(r.avg_ratio)}</td>
-    </tr>
-  `).join('');
+    </tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--gray-500)">暂无数据</td></tr>';
 }
 
 function renderAnnualMonthTable(months) {
-  const tbody = document.getElementById('annualMonthBody');
-  if (!months.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--gray-500)">暂无月度财务数据</td></tr>';
-    return;
-  }
-  tbody.innerHTML = months.map(m => `
+  document.getElementById('annualMonthBody').innerHTML = months.length ? months.map(m => `
     <tr>
       <td style="font-weight:600">${m.month}月</td>
       <td>${fmt(m.total_revenue)}</td>
       <td>${fmt(m.outsource_revenue)}</td>
       <td>${fmt(m.total_salary_cost)}</td>
-      <td>${fmt(parseFloat(m.fixed_expense) + parseFloat(m.other_expense))}</td>
+      <td>${fmt(parseFloat(m.fixed_expense)+parseFloat(m.other_expense))}</td>
       <td style="font-weight:700;color:${parseFloat(m.total_profit)>=0?'var(--success)':'var(--danger)'}">${fmt(m.total_profit)}</td>
       <td>${ratioBadge(m.profit_rate)}</td>
-    </tr>
-  `).join('');
+    </tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--gray-500)">暂无月度财务数据</td></tr>';
 }
 
 // ===== 员工收益比 =====
 async function loadEmployeeProfit() {
   const { year, month } = getSelYearMonth();
   const typeFilter = document.getElementById('empTypeFilter')?.value || '';
-  const data = await api('GET', `/finance/summary/${year}/${month}`);
-  let emps = data.employees || [];
-  if (typeFilter) emps = emps.filter(e => e.employee_type === typeFilter);
-  document.getElementById('empTableTitle').textContent = `${year}年${month}月 员工收益明细`;
-  renderEmpTable(emps);
-  renderEmpBarChart(emps);
+  try {
+    const data = await api('GET', `/finance/summary/${year}/${month}`);
+    empTableData = data.employees || [];
+    if (typeFilter) empTableData = empTableData.filter(e => e.employee_type === typeFilter);
+    document.getElementById('empTableTitle').textContent = `${year}年${month}月 员工收益明细`;
+    empSortKey = 'profit_ratio'; empSortDesc = true;
+    renderEmpTable();
+    renderEmpBarChart(empTableData);
+  } catch(e) { console.error(e); }
 }
 
-function renderEmpTable(rows) {
-  const tbody = document.getElementById('empTableBody');
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--gray-500)">暂无数据，请先上传或录入数据</td></tr>';
-    return;
-  }
-  tbody.innerHTML = rows.map((r, i) => `
+function sortEmpBy(key) {
+  if (empSortKey === key) empSortDesc = !empSortDesc;
+  else { empSortKey = key; empSortDesc = true; }
+  renderEmpTable();
+}
+
+function renderEmpTable() {
+  const rows = [...empTableData].sort((a, b) => {
+    const av = parseFloat(a[empSortKey]) || 0;
+    const bv = parseFloat(b[empSortKey]) || 0;
+    return empSortDesc ? bv - av : av - bv;
+  });
+
+  const sa = (k) => sortArrow(k, empSortKey, empSortDesc);
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap';
+
+  document.getElementById('empTableThead').innerHTML = `
     <tr>
-      <td style="color:var(--gray-400);font-weight:600">${i + 1}</td>
+      <th>排名</th><th>姓名</th><th>类型</th><th>项目</th>
+      <th style="${thStyle}" onclick="sortEmpBy('daily_rate')">人天单价 ${sa('daily_rate')}</th>
+      <th style="${thStyle}" onclick="sortEmpBy('dispatch_days')">结算人天 ${sa('dispatch_days')}</th>
+      <th style="${thStyle}" onclick="sortEmpBy('revenue')">结算金额 ${sa('revenue')}</th>
+      <th style="${thStyle}" onclick="sortEmpBy('cost')">成本 ${sa('cost')}</th>
+      <th style="${thStyle}" onclick="sortEmpBy('profit')">盈利金额 ${sa('profit')}</th>
+      <th style="${thStyle}" onclick="sortEmpBy('profit_ratio')">收益比 ${sa('profit_ratio')}</th>
+      <th>状态</th>
+    </tr>`;
+
+  const tbody = document.getElementById('empTableBody');
+  tbody.innerHTML = rows.length ? rows.map((r, i) => `
+    <tr>
+      <td style="color:var(--gray-400);font-weight:600">${i+1}</td>
       <td style="font-weight:600">${r.name}</td>
       <td>${typeBadge(r.employee_type)}</td>
-      <td><span style="color:var(--gray-500)">${r.project || '--'}</span></td>
+      <td><span style="color:var(--gray-500)">${r.project||'--'}</span></td>
       <td>¥${parseFloat(r.daily_rate).toLocaleString()}/天</td>
       <td>${parseFloat(r.dispatch_days).toFixed(2)} 天</td>
       <td>${fmt(r.revenue)}</td>
@@ -390,43 +413,37 @@ function renderEmpTable(rows) {
       <td style="font-weight:700;color:${parseFloat(r.profit)>=0?'var(--success)':'var(--danger)'}">${fmt(r.profit)}</td>
       <td>${ratioBadge(r.profit_ratio)}</td>
       <td>${statusTag(r.status)}</td>
-    </tr>
-  `).join('');
+    </tr>`).join('')
+    : '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--gray-500)">暂无数据，请先上传或录入数据</td></tr>';
 }
 
 function renderEmpBarChart(rows) {
   const ctx = document.getElementById('empBarChart').getContext('2d');
   if (empBarChart) empBarChart.destroy();
   if (!rows.length) return;
-  const sorted = [...rows].sort((a, b) => parseFloat(b.profit) - parseFloat(a.profit));
+  const sorted = [...rows].sort((a,b) => parseFloat(b.profit)-parseFloat(a.profit));
   empBarChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: sorted.map(r => r.name),
+      labels: sorted.map(r=>r.name),
       datasets: [
-        { label: '结算金额', data: sorted.map(r => r.revenue), backgroundColor: '#bfdbfe' },
-        { label: '盈利金额', data: sorted.map(r => r.profit), backgroundColor: sorted.map(r => parseFloat(r.profit) >= 0 ? '#22c55e' : '#ef4444') }
+        { label:'结算金额', data:sorted.map(r=>r.revenue), backgroundColor:'#bfdbfe' },
+        { label:'盈利金额', data:sorted.map(r=>r.profit), backgroundColor:sorted.map(r=>parseFloat(r.profit)>=0?'#22c55e':'#ef4444') }
       ]
     },
-    options: {
-      plugins: { legend: { position: 'bottom' } },
-      scales: { y: { ticks: { callback: v => '¥' + (v/1000).toFixed(0) + 'k' } } }
-    }
+    options: { plugins:{legend:{position:'bottom'}}, scales:{y:{ticks:{callback:v=>'¥'+(v/1000).toFixed(0)+'k'}}} }
   });
 }
 
 // ===== 手动录入 =====
 function calcManualPreview() {
-  const empId = document.getElementById('manualEmployee').value;
-  const emp = employees.find(e => e.id == empId);
+  const emp = employees.find(e => e.id == document.getElementById('manualEmployee').value);
   const days = parseFloat(document.getElementById('manualDays').value) || 0;
   const cost = parseFloat(document.getElementById('manualCost').value) || 0;
   if (!emp || !days) { document.getElementById('manualCalcResult').style.display = 'none'; return; }
-
   const revenue = days * parseFloat(emp.daily_rate);
   const profit = revenue - cost;
   const ratio = revenue > 0 ? profit / revenue : 0;
-
   document.getElementById('calcRevenue').textContent = fmt(revenue);
   document.getElementById('calcProfit').textContent = fmt(profit);
   document.getElementById('calcProfit').style.color = profit >= 0 ? 'var(--success)' : 'var(--danger)';
@@ -443,32 +460,27 @@ async function submitManualEntry() {
   const status = document.getElementById('manualStatus').value;
   const notes = document.getElementById('manualNotes').value;
   const msg = document.getElementById('manualMsg');
-
   if (!employee_id || !dispatch_days) { msg.innerHTML = '<span style="color:var(--danger)">请选择员工并填写人天数</span>'; return; }
-
   try {
     await api('POST', '/finance/dispatch', { employee_id, year, month, dispatch_days, cost, status, notes });
     msg.innerHTML = '<span style="color:var(--success)">✓ 保存成功</span>';
     setTimeout(() => msg.innerHTML = '', 3000);
-  } catch (e) {
-    msg.innerHTML = `<span style="color:var(--danger)">保存失败</span>`;
-  }
+  } catch(e) { msg.innerHTML = '<span style="color:var(--danger)">保存失败</span>'; }
 }
 
-// ===== 财务录入模态框 =====
+// ===== 财务模态框 =====
 function openFinanceModal() { document.getElementById('financeModal').classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 async function saveFinance() {
   const { year, month } = getSelYearMonth();
-  const body = {
+  await api('POST', '/finance/monthly', {
     year, month,
     outsource_revenue: document.getElementById('fOutsource').value || 0,
     fixed_expense: document.getElementById('fFixed').value || 0,
     other_expense: document.getElementById('fOther').value || 0,
     notes: document.getElementById('fNotes').value
-  };
-  await api('POST', '/finance/monthly', body);
+  });
   closeModal('financeModal');
   loadCurrentMonth();
 }
@@ -481,24 +493,18 @@ async function uploadFile(file) {
   const result = document.getElementById('uploadResult');
   result.style.display = 'block';
   result.innerHTML = '<div style="color:var(--gray-500);padding:12px">正在解析文件，导入全年数据...</div>';
-
   const fd = new FormData();
   fd.append('file', file);
   fd.append('year', year);
-
   try {
     const data = await apiUpload('/finance/upload-excel', fd);
     if (data.error) throw new Error(data.error);
-
     const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-    const summaryRows = Object.entries(data.summary || {})
-      .sort((a,b) => parseInt(a[0]) - parseInt(b[0]))
-      .map(([m, count]) => `<span style="display:inline-block;margin:2px 6px;font-size:12px;color:var(--gray-600)">${monthNames[parseInt(m)-1]}：${count}条</span>`)
-      .join('');
-
+    const summaryRows = Object.entries(data.summary||{}).sort((a,b)=>parseInt(a[0])-parseInt(b[0]))
+      .map(([m,count])=>`<span style="display:inline-block;margin:2px 6px;font-size:12px;color:var(--gray-600)">${monthNames[parseInt(m)-1]}：${count}条</span>`).join('');
     result.innerHTML = `
       <div class="success-msg" style="margin-bottom:12px">✓ 成功导入 ${data.imported} 条员工数据（${year}年全年）</div>
-      <div style="padding:10px 12px;background:var(--gray-50);border-radius:6px;margin-bottom:12px">${summaryRows || '无数据'}</div>
+      <div style="padding:10px 12px;background:var(--gray-50);border-radius:6px;margin-bottom:12px">${summaryRows||'无数据'}</div>
       <table style="font-size:13px;width:100%;border-collapse:collapse">
         <thead><tr>
           <th style="text-align:left;padding:6px 10px;background:var(--gray-50)">月份</th>
@@ -508,77 +514,113 @@ async function uploadFile(file) {
           <th style="text-align:right;padding:6px 10px;background:var(--gray-50)">盈利</th>
           <th style="text-align:right;padding:6px 10px;background:var(--gray-50)">收益比</th>
         </tr></thead>
-        <tbody>
-          ${data.data.map(r => `
-            <tr>
-              <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);color:var(--gray-500)">${r.month}月</td>
-              <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)">${r.name}</td>
-              <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${r.dispatch_days}</td>
-              <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${fmt(r.revenue)}</td>
-              <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100);color:${r.profit>=0?'var(--success)':'var(--danger)'}">${fmt(r.profit)}</td>
-              <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${ratioBadge(r.profit_ratio)}</td>
-            </tr>
-          `).join('')}
+        <tbody>${data.data.map(r=>`
+          <tr>
+            <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);color:var(--gray-500)">${r.month}月</td>
+            <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)">${r.name}</td>
+            <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${r.dispatch_days}</td>
+            <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${fmt(r.revenue)}</td>
+            <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100);color:${r.profit>=0?'var(--success)':'var(--danger)'}">${fmt(r.profit)}</td>
+            <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${ratioBadge(r.profit_ratio)}</td>
+          </tr>`).join('')}
         </tbody>
       </table>`;
     loadEmployees();
-  } catch (err) {
-    result.innerHTML = `<div class="error-msg">解析失败：${err.message}</div>`;
-  }
+  } catch(err) { result.innerHTML = `<div class="error-msg">解析失败：${err.message}</div>`; }
 }
 
-// ===== 员工管理 =====
+// ===== 员工管理（内联编辑）=====
 async function loadEmpMgmt() {
   const filter = document.getElementById('empListFilter')?.value || '';
-  let rows = await api('GET', '/employees');
+  const all = await api('GET', '/employees');
+  empMgmtCache = all;
+  let active = all.filter(e => !e.resigned_date && e.is_active !== false);
+  const resigned = all.filter(e => e.resigned_date || e.is_active === false);
+  if (filter) active = active.filter(e => e.employee_type === filter);
 
-  const active = rows.filter(e => !e.resigned_date && (e.is_active !== false));
-  const resigned = rows.filter(e => e.resigned_date || e.is_active === false);
-
-  const filtered = filter ? active.filter(e => e.employee_type === filter) : active;
-
-  document.getElementById('empMgmtBody').innerHTML = filtered.map(e => `
-    <tr>
-      <td style="font-weight:600">${e.name}</td>
-      <td>${typeBadge(e.employee_type)}</td>
-      <td>${e.project || '--'}</td>
-      <td>¥${parseFloat(e.daily_rate).toLocaleString()}/天</td>
-      <td>${e.monthly_salary ? fmt(e.monthly_salary) : '--'}</td>
-      <td>
-        <button class="btn-secondary btn-sm" onclick="openEmpModal(${JSON.stringify(e).replace(/"/g,'&quot;')})">编辑</button>
-        <button class="btn-danger btn-sm" style="margin-left:6px" onclick="openResignModal(${e.id}, '${e.name}')">离职</button>
-      </td>
-    </tr>
-  `).join('') || `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-500)">暂无在职员工</td></tr>`;
+  document.getElementById('empMgmtBody').innerHTML = active.map(e => empActiveRow(e)).join('')
+    || `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-500)">暂无在职员工</td></tr>`;
 
   document.getElementById('empResignedBody').innerHTML = resigned.length ? resigned.map(e => `
     <tr style="color:var(--gray-400)">
       <td style="font-weight:600">${e.name}</td>
       <td>${typeBadge(e.employee_type)}</td>
-      <td>${e.project || '--'}</td>
+      <td>${e.project||'--'}</td>
       <td>¥${parseFloat(e.daily_rate).toLocaleString()}/天</td>
       <td>${e.resigned_date ? e.resigned_date.slice(0,10) : '--'}</td>
-      <td>
-        <button class="btn-secondary btn-sm" onclick="reinstateEmp(${e.id})">恢复在职</button>
-      </td>
-    </tr>
-  `).join('') : `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-400)">无离职员工</td></tr>`;
+      <td><button class="btn-secondary btn-sm" onclick="reinstateEmp(${e.id})">恢复在职</button></td>
+    </tr>`).join('')
+    : `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-400)">无离职员工</td></tr>`;
 }
 
-function openEmpModal(emp) {
-  document.getElementById('empModalTitle').textContent = emp ? '编辑员工' : '新增员工';
-  document.getElementById('empModalId').value = emp?.id || '';
-  document.getElementById('empName').value = emp?.name || '';
-  document.getElementById('empType').value = emp?.employee_type || '外派';
-  document.getElementById('empProject').value = emp?.project || '';
-  document.getElementById('empRate').value = emp?.daily_rate || '';
-  document.getElementById('empSalary').value = emp?.monthly_salary || '';
-  document.getElementById('empHousing').value = emp?.housing_subsidy || '';
+function empActiveRow(e, editing=false) {
+  const data = JSON.stringify(e).replace(/"/g,'&quot;');
+  if (!editing) {
+    return `<tr id="emprow-${e.id}">
+      <td style="font-weight:600" onclick="editEmpRow(${e.id})" class="editable-cell">${e.name}</td>
+      <td onclick="editEmpRow(${e.id})" class="editable-cell">${typeBadge(e.employee_type)}</td>
+      <td onclick="editEmpRow(${e.id})" class="editable-cell">${e.project||'--'}</td>
+      <td onclick="editEmpRow(${e.id})" class="editable-cell">¥${parseFloat(e.daily_rate).toLocaleString()}/天</td>
+      <td onclick="editEmpRow(${e.id})" class="editable-cell">${e.monthly_salary ? fmt(e.monthly_salary) : '--'}</td>
+      <td><button class="btn-danger btn-sm" onclick="openResignModal(${e.id},'${e.name}')">离职</button></td>
+    </tr>`;
+  }
+  return `<tr id="emprow-${e.id}" style="background:var(--primary)08">
+    <td><input class="inline-input" value="${e.name||''}" id="ei-name-${e.id}"></td>
+    <td><select class="inline-input" id="ei-type-${e.id}">
+      <option value="外派" ${(e.employee_type||'外派')==='外派'?'selected':''}>外派</option>
+      <option value="外包" ${e.employee_type==='外包'?'selected':''}>外包</option>
+    </select></td>
+    <td><input class="inline-input" value="${e.project||''}" id="ei-project-${e.id}" placeholder="项目组"></td>
+    <td><input class="inline-input" type="number" value="${e.daily_rate||''}" id="ei-rate-${e.id}" placeholder="人天单价"></td>
+    <td><input class="inline-input" type="number" value="${e.monthly_salary||''}" id="ei-salary-${e.id}" placeholder="月薪"></td>
+    <td style="white-space:nowrap">
+      <button class="btn-primary btn-sm" onclick="saveEmpRow(${e.id})">保存</button>
+      <button class="btn-secondary btn-sm" style="margin-left:4px" onclick="cancelEmpRow(${e.id})">取消</button>
+    </td>
+  </tr>`;
+}
+
+function editEmpRow(id) {
+  const e = empMgmtCache.find(x => x.id == id);
+  if (!e) { loadEmpMgmt(); return; }
+  document.getElementById(`emprow-${id}`).outerHTML = empActiveRow(e, true);
+  document.getElementById(`ei-name-${id}`).focus();
+}
+
+function cancelEmpRow(id) {
+  const e = empMgmtCache.find(x => x.id == id);
+  if (!e) { loadEmpMgmt(); return; }
+  document.getElementById(`emprow-${id}`).outerHTML = empActiveRow(e, false);
+}
+
+async function saveEmpRow(id) {
+  const body = {
+    name: document.getElementById(`ei-name-${id}`).value,
+    employee_type: document.getElementById(`ei-type-${id}`).value,
+    project: document.getElementById(`ei-project-${id}`).value,
+    daily_rate: document.getElementById(`ei-rate-${id}`).value,
+    monthly_salary: document.getElementById(`ei-salary-${id}`).value,
+    housing_subsidy: 0
+  };
+  await api('PUT', `/employees/${id}`, body);
+  loadEmpMgmt();
+  loadEmployees();
+}
+
+function openEmpModal() {
+  document.getElementById('empModalTitle').textContent = '新增员工';
+  document.getElementById('empModalId').value = '';
+  document.getElementById('empName').value = '';
+  document.getElementById('empType').value = '外派';
+  document.getElementById('empProject').value = '';
+  document.getElementById('empRate').value = '';
+  document.getElementById('empSalary').value = '';
+  document.getElementById('empHousing').value = '';
   document.getElementById('empModal').classList.add('open');
 }
 
 async function saveEmployee() {
-  const id = document.getElementById('empModalId').value;
   const body = {
     name: document.getElementById('empName').value,
     employee_type: document.getElementById('empType').value,
@@ -587,8 +629,7 @@ async function saveEmployee() {
     monthly_salary: document.getElementById('empSalary').value,
     housing_subsidy: document.getElementById('empHousing').value
   };
-  if (id) await api('PUT', `/employees/${id}`, body);
-  else await api('POST', '/employees', body);
+  await api('POST', '/employees', body);
   closeModal('empModal');
   loadEmpMgmt();
   loadEmployees();
@@ -597,7 +638,7 @@ async function saveEmployee() {
 function openResignModal(id, name) {
   document.getElementById('resignEmpId').value = id;
   document.getElementById('resignEmpName').textContent = `员工：${name}`;
-  document.getElementById('resignDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('resignDate').value = new Date().toISOString().slice(0,10);
   document.getElementById('resignModal').classList.add('open');
 }
 
@@ -628,18 +669,16 @@ function updateClearPreview() {
   const year = document.getElementById('clearYear')?.value;
   const month = document.getElementById('clearMonth')?.value;
   const empSel = document.getElementById('clearEmployee');
-  const empName = empSel?.options[empSel.selectedIndex]?.text || '';
   const empId = empSel?.value;
+  const empName = empSel?.options[empSel.selectedIndex]?.text || '';
   const el = document.getElementById('clearPreviewText');
   if (!el || !year) return;
-
   let scope = `${year}年`;
   if (month) scope += `${month}月`;
   else scope += '全年（所有月份）';
   if (empId) scope += ` · ${empName}`;
   else scope += ' · 所有员工';
-
-  el.innerHTML = `即将清除：<strong>${scope}</strong> 的外派结算数据${!empId ? '及月度财务汇总' : ''}`;
+  el.innerHTML = `即将清除：<strong>${scope}</strong> 的外派结算数据${!empId?'及月度财务汇总':''}`;
 }
 
 async function confirmClear() {
@@ -647,24 +686,17 @@ async function confirmClear() {
   const month = document.getElementById('clearMonth').value;
   const employee_id = document.getElementById('clearEmployee').value;
   const msg = document.getElementById('clearMsg');
-
   if (!year) { msg.innerHTML = '<span style="color:var(--danger)">请选择年份</span>'; return; }
-
   const empSel = document.getElementById('clearEmployee');
   const empName = empSel.options[empSel.selectedIndex]?.text || '所有员工';
-  let confirmMsg = `确认清除 ${year}年${month ? month + '月' : '全年'} · ${empName} 的数据？\n此操作不可撤销！`;
-  if (!confirm(confirmMsg)) return;
-
+  if (!confirm(`确认清除 ${year}年${month?month+'月':'全年'} · ${empName} 的数据？\n此操作不可撤销！`)) return;
   try {
     const body = { year };
     if (month) body.month = month;
     if (employee_id) body.employee_id = employee_id;
-
     const data = await api('DELETE', '/finance/clear', body);
     if (data.error) throw new Error(data.error);
     msg.innerHTML = `<span style="color:var(--success)">✓ 已清除 ${data.deleted_dispatch} 条外派记录，${data.deleted_finance} 条月度财务记录</span>`;
     setTimeout(() => msg.innerHTML = '', 5000);
-  } catch (err) {
-    msg.innerHTML = `<span style="color:var(--danger)">清除失败：${err.message}</span>`;
-  }
+  } catch(err) { msg.innerHTML = `<span style="color:var(--danger)">清除失败：${err.message}</span>`; }
 }

@@ -12,7 +12,7 @@ router.get('/summary/:year/:month', auth, async (req, res) => {
   try {
     const finance = await pool.query('SELECT * FROM monthly_finance WHERE year=$1 AND month=$2', [year, month]);
     const dispatch = await pool.query(`
-      SELECT md.*, e.name, e.project, e.daily_rate
+      SELECT md.*, e.name, e.project, e.daily_rate, e.employee_type
       FROM monthly_dispatch md
       JOIN employees e ON md.employee_id = e.id
       WHERE md.year=$1 AND md.month=$2
