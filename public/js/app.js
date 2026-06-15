@@ -30,7 +30,6 @@ let pieChart, trendChart, empBarChart;
   });
 
   document.getElementById('selMonth').value = currentMonth;
-  document.getElementById('uploadMonth').value = currentMonth;
   document.getElementById('manualMonth').value = currentMonth;
 
   // 侧边栏导航
@@ -336,37 +335,43 @@ function handleFileSelect(input) { if (input.files[0]) uploadFile(input.files[0]
 
 async function uploadFile(file) {
   const year = document.getElementById('uploadYear').value;
-  const month = document.getElementById('uploadMonth').value;
   const result = document.getElementById('uploadResult');
   result.style.display = 'block';
-  result.innerHTML = '<div style="color:var(--gray-500);padding:12px">正在解析文件...</div>';
+  result.innerHTML = '<div style="color:var(--gray-500);padding:12px">正在解析文件，导入全年数据...</div>';
 
   const fd = new FormData();
   fd.append('file', file);
   fd.append('year', year);
-  fd.append('month', month);
 
   try {
     const data = await apiUpload('/finance/upload-excel', fd);
     if (data.error) throw new Error(data.error);
+
+    const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+    const summaryRows = Object.entries(data.summary || {})
+      .sort((a,b) => parseInt(a[0]) - parseInt(b[0]))
+      .map(([m, count]) => `<span style="display:inline-block;margin:2px 6px;font-size:12px;color:var(--gray-600)">${monthNames[parseInt(m)-1]}：${count}条</span>`)
+      .join('');
+
     result.innerHTML = `
-      <div class="success-msg" style="margin-bottom:12px">✓ 成功导入 ${data.imported} 条员工数据（${year}年${month}月）</div>
+      <div class="success-msg" style="margin-bottom:12px">✓ 成功导入 ${data.imported} 条员工数据（${year}年全年）</div>
+      <div style="padding:10px 12px;background:var(--gray-50);border-radius:6px;margin-bottom:12px">${summaryRows || '无数据'}</div>
       <table style="font-size:13px;width:100%;border-collapse:collapse">
         <thead><tr>
+          <th style="text-align:left;padding:6px 10px;background:var(--gray-50)">月份</th>
           <th style="text-align:left;padding:6px 10px;background:var(--gray-50)">姓名</th>
           <th style="text-align:right;padding:6px 10px;background:var(--gray-50)">结算人天</th>
           <th style="text-align:right;padding:6px 10px;background:var(--gray-50)">结算金额</th>
-          <th style="text-align:right;padding:6px 10px;background:var(--gray-50)">成本</th>
           <th style="text-align:right;padding:6px 10px;background:var(--gray-50)">盈利</th>
           <th style="text-align:right;padding:6px 10px;background:var(--gray-50)">收益比</th>
         </tr></thead>
         <tbody>
           ${data.data.map(r => `
             <tr>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);color:var(--gray-500)">${r.month}月</td>
               <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)">${r.name}</td>
               <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${r.dispatch_days}</td>
               <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${fmt(r.revenue)}</td>
-              <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${fmt(r.cost)}</td>
               <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100);color:${r.profit>=0?'var(--success)':'var(--danger)'}">${fmt(r.profit)}</td>
               <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--gray-100)">${ratioBadge(r.profit_ratio)}</td>
             </tr>

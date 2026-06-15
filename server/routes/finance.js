@@ -108,65 +108,75 @@ router.post('/dispatch', auth, async (req, res) => {
 });
 
 // 上传Excel文件解析员工数据（参考"3.21"表格格式）
+// 支持全年批量导入：自动遍历所有12个月，跳过无数据的月份
 router.post('/upload-excel', auth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: '请上传文件' });
-  const { year, month } = req.body;
-  if (!year || !month) return res.status(400).json({ error: '请指定年月' });
+  const { year } = req.body;
+  if (!year) return res.status(400).json({ error: '请指定年份' });
 
   try {
     const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const results = [];
+    const totalImported = [];
     const errors = [];
 
-    // 尝试解析"3.21"格式：姓名 | 人天单价 | 月份数据(人天,金额,成本,盈利,比例)
-    // 列偏移：每月占5列，月份从第3列(index 2)开始
     const targetSheet = wb.SheetNames.find(n => n.includes('3.21') || n.includes('结算')) || wb.SheetNames[0];
     const ws = wb.Sheets[targetSheet];
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-    const monthIdx = parseInt(month) - 1;  // 0-based
-    const colOffset = 2 + monthIdx * 5;    // 每月5列: 人天,金额,成本,盈利,比例
+    // 遍历全年12个月
+    for (let monthIdx = 0; monthIdx < 12; monthIdx++) {
+      const month = monthIdx + 1;
+      const colOffset = 2 + monthIdx * 5; // 每月5列: 人天,金额,成本,盈利,比例
 
-    for (let i = 2; i < data.length; i++) {
-      const row = data[i];
-      const name = row[0]?.toString().trim();
-      const daily_rate = parseFloat(row[1]) || 0;
-      if (!name || !daily_rate) continue;
+      const monthResults = [];
+      for (let i = 2; i < data.length; i++) {
+        const row = data[i];
+        const name = row[0]?.toString().trim();
+        const daily_rate = parseFloat(row[1]) || 0;
+        if (!name || !daily_rate) continue;
 
-      const dispatch_days = parseFloat(row[colOffset]) || 0;
-      const revenue = parseFloat(row[colOffset + 1]) || 0;
-      const cost = parseFloat(row[colOffset + 2]) || 0;
-      const profit = parseFloat(row[colOffset + 3]) || 0;
-      const profit_ratio = parseFloat(row[colOffset + 4]) || 0;
+        const dispatch_days = parseFloat(row[colOffset]) || 0;
+        if (dispatch_days === 0) continue;
 
-      if (dispatch_days === 0) continue;
+        const revenue = parseFloat(row[colOffset + 1]) || 0;
+        const cost = parseFloat(row[colOffset + 2]) || 0;
+        const profit = parseFloat(row[colOffset + 3]) || 0;
+        const profit_ratio = parseFloat(row[colOffset + 4]) || 0;
 
-      // 查找或创建员工
-      let empResult = await pool.query('SELECT id FROM employees WHERE name=$1', [name]);
-      let emp_id;
-      if (empResult.rows.length === 0) {
-        const newEmp = await pool.query(
-          'INSERT INTO employees (name, daily_rate) VALUES ($1,$2) RETURNING id',
-          [name, daily_rate]
-        );
-        emp_id = newEmp.rows[0].id;
-      } else {
-        emp_id = empResult.rows[0].id;
-        // 更新单价
-        await pool.query('UPDATE employees SET daily_rate=$1 WHERE id=$2', [daily_rate, emp_id]);
+        // 查找或创建员工
+        let empResult = await pool.query('SELECT id FROM employees WHERE name=$1', [name]);
+        let emp_id;
+        if (empResult.rows.length === 0) {
+          const newEmp = await pool.query(
+            'INSERT INTO employees (name, daily_rate) VALUES ($1,$2) RETURNING id',
+            [name, daily_rate]
+          );
+          emp_id = newEmp.rows[0].id;
+        } else {
+          emp_id = empResult.rows[0].id;
+          await pool.query('UPDATE employees SET daily_rate=$1 WHERE id=$2', [daily_rate, emp_id]);
+        }
+
+        await pool.query(`
+          INSERT INTO monthly_dispatch (employee_id, year, month, dispatch_days, adjusted_days, revenue, cost, profit, profit_ratio)
+          VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8)
+          ON CONFLICT (employee_id, year, month) DO UPDATE SET
+            dispatch_days=$4, adjusted_days=$4, revenue=$5, cost=$6, profit=$7, profit_ratio=$8
+        `, [emp_id, year, month, dispatch_days, revenue, cost, profit, profit_ratio]);
+
+        monthResults.push({ month, name, dispatch_days, revenue, cost, profit, profit_ratio });
       }
 
-      await pool.query(`
-        INSERT INTO monthly_dispatch (employee_id, year, month, dispatch_days, adjusted_days, revenue, cost, profit, profit_ratio)
-        VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8)
-        ON CONFLICT (employee_id, year, month) DO UPDATE SET
-          dispatch_days=$4, adjusted_days=$4, revenue=$5, cost=$6, profit=$7, profit_ratio=$8
-      `, [emp_id, year, month, dispatch_days, revenue, cost, profit, profit_ratio]);
-
-      results.push({ name, dispatch_days, revenue, cost, profit, profit_ratio });
+      totalImported.push(...monthResults);
     }
 
-    res.json({ imported: results.length, data: results, errors });
+    // 按月汇总导入数量
+    const summary = {};
+    for (const r of totalImported) {
+      summary[r.month] = (summary[r.month] || 0) + 1;
+    }
+
+    res.json({ imported: totalImported.length, summary, data: totalImported, errors });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
