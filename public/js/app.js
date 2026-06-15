@@ -5,7 +5,9 @@ let currentPage = 'dashboard';
 let employees = [];
 let annualEmpData = [];
 let empTableData = [];  // 当前月员工数据（供排序用）
-let empMgmtCache = []; // 员工管理页缓存
+let empMgmtCache = [];
+let empMgmtSortKey = 'name';
+let empMgmtSortDesc = false;
 let empSortKey = 'profit_ratio';
 let empSortDesc = true;
 let annualSortKey = 'total_profit';
@@ -550,16 +552,44 @@ async function uploadFile(file) {
 }
 
 // ===== 员工管理（内联编辑）=====
+const EMP_COLS = [
+  { key: 'name',            label: '姓名',     w: '10%', sortable: true  },
+  { key: 'employee_type',   label: '类型',     w: '7%',  sortable: true  },
+  { key: 'project',         label: '项目组',   w: '9%',  sortable: true  },
+  { key: 'daily_rate',      label: '人天单价', w: '9%',  sortable: true  },
+  { key: 'monthly_salary',  label: '月薪',     w: '9%',  sortable: true  },
+  { key: 'housing_subsidy', label: '住宿/天',  w: '9%',  sortable: true  },
+  { key: 'other',           label: '其他',     w: '9%',  sortable: false },
+  { key: '_action',         label: '操作',     w: '8%',  sortable: false },
+];
+
+function renderEmpMgmtThead() {
+  const sa = (k) => sortArrow(k, empMgmtSortKey, empMgmtSortDesc);
+  const ths = EMP_COLS.map(c => {
+    if (c.sortable) return `<th style="cursor:pointer;user-select:none;width:${c.w}" onclick="sortEmpMgmt('${c.key}')">${c.label} ${sa(c.key)}</th>`;
+    return `<th style="width:${c.w}">${c.label}</th>`;
+  }).join('');
+  document.getElementById('empMgmtThead').innerHTML = `<tr>${ths}</tr>`;
+}
+
+function sortEmpMgmt(key) {
+  if (empMgmtSortKey === key) empMgmtSortDesc = !empMgmtSortDesc;
+  else { empMgmtSortKey = key; empMgmtSortDesc = false; }
+  renderEmpMgmtRows(empMgmtCache.filter(e => !e.resigned_date && e.is_active !== false));
+  renderEmpMgmtThead();
+}
+
 async function loadEmpMgmt() {
   const filter = document.getElementById('empListFilter')?.value || '';
   const all = await api('GET', '/employees');
   empMgmtCache = all;
+
   let active = all.filter(e => !e.resigned_date && e.is_active !== false);
   const resigned = all.filter(e => e.resigned_date || e.is_active === false);
   if (filter) active = active.filter(e => e.employee_type === filter);
 
-  document.getElementById('empMgmtBody').innerHTML = active.map(e => empActiveRow(e)).join('')
-    || `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-500)">暂无在职员工</td></tr>`;
+  renderEmpMgmtThead();
+  renderEmpMgmtRows(active);
 
   document.getElementById('empResignedBody').innerHTML = resigned.length ? resigned.map(e => `
     <tr style="color:var(--gray-400)">
@@ -573,32 +603,54 @@ async function loadEmpMgmt() {
     : `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-400)">无离职员工</td></tr>`;
 }
 
-function empActiveRow(e, editing=false) {
-  const data = JSON.stringify(e).replace(/"/g,'&quot;');
+function renderEmpMgmtRows(active) {
+  const sorted = [...active].sort((a, b) => {
+    const av = (a[empMgmtSortKey] || '').toString();
+    const bv = (b[empMgmtSortKey] || '').toString();
+    const an = parseFloat(av), bn = parseFloat(bv);
+    const cmp = isNaN(an) ? av.localeCompare(bv) : an - bn;
+    return empMgmtSortDesc ? -cmp : cmp;
+  });
+  document.getElementById('empMgmtBody').innerHTML = sorted.map(e => empActiveRow(e)).join('')
+    || `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--gray-500)">暂无在职员工</td></tr>`;
+}
+
+function empActiveRow(e, editing = false) {
   if (!editing) {
-    return `<tr id="emprow-${e.id}">
-      <td style="font-weight:600" onclick="editEmpRow(${e.id})" class="editable-cell">${e.name}</td>
-      <td onclick="editEmpRow(${e.id})" class="editable-cell">${typeBadge(e.employee_type)}</td>
-      <td onclick="editEmpRow(${e.id})" class="editable-cell">${e.project||'--'}</td>
-      <td onclick="editEmpRow(${e.id})" class="editable-cell">¥${parseFloat(e.daily_rate).toLocaleString()}/天</td>
-      <td onclick="editEmpRow(${e.id})" class="editable-cell">${e.monthly_salary ? fmt(e.monthly_salary) : '--'}</td>
-      <td><button class="btn-danger btn-sm" onclick="openResignModal(${e.id},'${e.name}')">离职</button></td>
+    return `<tr id="emprow-${e.id}" ondblclick="editEmpRow(${e.id})" style="cursor:default">
+      <td class="editable-cell" onclick="editEmpRow(${e.id})">${e.name}</td>
+      <td class="editable-cell" onclick="editEmpRow(${e.id})">${typeBadge(e.employee_type)}</td>
+      <td class="editable-cell" onclick="editEmpRow(${e.id})">${e.project||'--'}</td>
+      <td class="editable-cell" onclick="editEmpRow(${e.id})">¥${parseFloat(e.daily_rate||0).toLocaleString()}/天</td>
+      <td class="editable-cell" onclick="editEmpRow(${e.id})">${e.monthly_salary>0 ? fmt(e.monthly_salary) : '--'}</td>
+      <td class="editable-cell" onclick="editEmpRow(${e.id})">${e.housing_subsidy>0 ? '¥'+parseFloat(e.housing_subsidy).toLocaleString()+'/天' : '--'}</td>
+      <td class="editable-cell" onclick="editEmpRow(${e.id})">${e.other_info||'--'}</td>
+      <td><button class="btn-danger btn-sm" onclick="openResignModal(${e.id},'${e.name.replace(/'/g,"\\'")}')">离职</button></td>
     </tr>`;
   }
-  return `<tr id="emprow-${e.id}" style="background:var(--primary)08">
-    <td><input class="inline-input" value="${e.name||''}" id="ei-name-${e.id}"></td>
-    <td><select class="inline-input" id="ei-type-${e.id}">
+  // 编辑行：onkeydown 处理 Enter/ESC
+  const kd = `onkeydown="empRowKey(event,${e.id})"`;
+  return `<tr id="emprow-${e.id}" style="background:#f0f7ff">
+    <td><input class="inline-input" id="ei-name-${e.id}" value="${(e.name||'').replace(/"/g,'&quot;')}" ${kd}></td>
+    <td><select class="inline-input" id="ei-type-${e.id}" ${kd}>
       <option value="外派" ${(e.employee_type||'外派')==='外派'?'selected':''}>外派</option>
       <option value="外包" ${e.employee_type==='外包'?'selected':''}>外包</option>
     </select></td>
-    <td><input class="inline-input" value="${e.project||''}" id="ei-project-${e.id}" placeholder="项目组"></td>
-    <td><input class="inline-input" type="number" value="${e.daily_rate||''}" id="ei-rate-${e.id}" placeholder="人天单价"></td>
-    <td><input class="inline-input" type="number" value="${e.monthly_salary||''}" id="ei-salary-${e.id}" placeholder="月薪"></td>
+    <td><input class="inline-input" id="ei-project-${e.id}" value="${(e.project||'').replace(/"/g,'&quot;')}" placeholder="项目组" ${kd}></td>
+    <td><input class="inline-input" type="number" id="ei-rate-${e.id}" value="${e.daily_rate||''}" placeholder="人天单价" ${kd}></td>
+    <td><input class="inline-input" type="number" id="ei-salary-${e.id}" value="${e.monthly_salary||''}" placeholder="月薪" ${kd}></td>
+    <td><input class="inline-input" type="number" id="ei-housing-${e.id}" value="${e.housing_subsidy||''}" placeholder="住宿/天" ${kd}></td>
+    <td><input class="inline-input" id="ei-other-${e.id}" value="${(e.other_info||'').replace(/"/g,'&quot;')}" placeholder="其他备注" ${kd}></td>
     <td style="white-space:nowrap">
       <button class="btn-primary btn-sm" onclick="saveEmpRow(${e.id})">保存</button>
       <button class="btn-secondary btn-sm" style="margin-left:4px" onclick="cancelEmpRow(${e.id})">取消</button>
     </td>
   </tr>`;
+}
+
+function empRowKey(event, id) {
+  if (event.key === 'Enter') { event.preventDefault(); saveEmpRow(id); }
+  if (event.key === 'Escape') { event.preventDefault(); cancelEmpRow(id); }
 }
 
 function editEmpRow(id) {
@@ -621,7 +673,8 @@ async function saveEmpRow(id) {
     project: document.getElementById(`ei-project-${id}`).value,
     daily_rate: document.getElementById(`ei-rate-${id}`).value,
     monthly_salary: document.getElementById(`ei-salary-${id}`).value,
-    housing_subsidy: 0
+    housing_subsidy: document.getElementById(`ei-housing-${id}`).value,
+    other_info: document.getElementById(`ei-other-${id}`).value,
   };
   await api('PUT', `/employees/${id}`, body);
   loadEmpMgmt();

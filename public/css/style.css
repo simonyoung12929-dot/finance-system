@@ -51,7 +51,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 .editable-cell { cursor: pointer; }
 .editable-cell:hover { background: var(--gray-50); }
-.inline-input { width: 100%; padding: 4px 8px; border: 1.5px solid var(--primary); border-radius: 6px; font-size: 13px; background: white; box-sizing: border-box; }
+.inline-input { width: 100%; padding: 4px 6px; border: 1.5px solid var(--primary); border-radius: 6px; font-size: 13px; background: white; box-sizing: border-box; min-width: 0; }
+/* 防止内联编辑时列宽变化 */
+#empMgmtBody td, #empMgmtThead th { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* === 错误/成功 === */
 .error-msg { color: var(--danger); font-size: 13px; padding: 8px 12px; background: #fef2f2; border-radius: 6px; margin-top: 4px; }

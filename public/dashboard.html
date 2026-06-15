@@ -380,12 +380,10 @@
             <button class="btn-primary btn-sm" onclick="openEmpModal()">+ 新增员工</button>
           </div>
         </div>
-        <table>
-          <thead>
-            <tr><th>姓名</th><th>类型</th><th>项目组</th><th>人天单价</th><th>月薪</th><th>操作</th></tr>
-          </thead>
+        <table style="table-layout:fixed;width:100%">
+          <thead id="empMgmtThead"></thead>
           <tbody id="empMgmtBody">
-            <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-500)">加载中...</td></tr>
+            <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--gray-500)">加载中...</td></tr>
           </tbody>
         </table>
       </div>

@@ -28,6 +28,9 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='resigned_date') THEN
     ALTER TABLE employees ADD COLUMN resigned_date DATE DEFAULT NULL;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='other_info') THEN
+    ALTER TABLE employees ADD COLUMN other_info TEXT DEFAULT NULL;
+  END IF;
 END $$;
 
 -- 月度外派记录（每位员工每月）
